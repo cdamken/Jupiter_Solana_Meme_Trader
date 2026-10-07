@@ -234,6 +234,17 @@ def overview():
                 days = (now_ts - oldest["ts"]) / 86400
                 lots_age[s["id"]] = round(days, 1)
 
+    # Sparkline data: last 30 trades per coin {coin_id: [{ts, price, side}]}
+    sparklines = {}
+    for s in summaries:
+        rows = store._c.execute(
+            "SELECT ts, price, side FROM trades WHERE coin_id = ? ORDER BY ts ASC LIMIT 30",
+            (s["id"],),
+        ).fetchall()
+        if rows:
+            sparklines[s["id"]] = [{"ts": r["ts"], "price": r["price"], "side": r["side"]}
+                                    for r in rows]
+
     balance = store.usdc_balance()
     dep_row = store._c.execute(
         "SELECT COALESCE(SUM(delta), 0) AS total FROM usdc_ledger WHERE kind = 'deposit'"
@@ -248,6 +259,7 @@ def overview():
         last_trade_ts=last_trade_ts,
         recent_ledger=[dict(r) for r in recent_ledger],
         lots_age=lots_age,
+        sparklines=sparklines,
         now_ts=now_ts,
     )
 
