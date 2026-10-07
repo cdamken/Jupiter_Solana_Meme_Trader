@@ -125,6 +125,10 @@ def migrate(simd_dir: str, slug: str, label: str, mint: str,
     total_cost = 0.0
     now = time.time()
 
+    # First pass: insert lots, recording old SIMD id → new Jupiter id for levels_to linking.
+    simd_id_to_jupiter_id: dict[int, int] = {}
+    lots_with_levels: list[tuple[int, int]] = []  # (jupiter_lot_id, simd_levels_to_id)
+
     for i, lot in enumerate(lots):
         tok  = float(lot.get("tok", 0.0))
         cost = float(lot.get("cost", 0.0))
@@ -133,24 +137,71 @@ def migrate(simd_dir: str, slug: str, label: str, mint: str,
             skipped += 1
             continue
 
-        buy_price  = float(lot.get("price", cost / tok))
-        ts         = float(lot.get("ts", now))
-        origin     = str(lot.get("origin", "grid"))
+        buy_price   = float(lot.get("price", cost / tok))
+        ts          = float(lot.get("ts", now))
         trail_armed = int(bool(lot.get("trail_armed", False)))
         trail_peak  = float(lot.get("trail_peak", 0.0))
 
+        # --- origin resolution ---
+        # In SIMD, origin and boolean flags are separate: a lot can have
+        # origin='grid' AND reserve=True (floor reserve), or origin='grid' AND
+        # prebuy=True (prebuy v2). Jupiter uses origin as the single field.
+        # Priority: explicit origin wins if it is not 'grid'; then check flags.
+        origin = str(lot.get("origin", "grid"))
+        if lot.get("reserve") and origin == "grid":
+            origin = "reserve"   # floor-reserve lot; gates reserve_summary + skip-buy
+        elif lot.get("prebuy") and origin == "grid":
+            origin = "prebuy"    # prebuy v2 durable marker
+
+        # Audit-only flags (no sell-path change): starter, crash, recycle.
+        # Jupiter has no columns for these; they are logged as a note only.
+        audit_flags = [f for f in ("starter", "crash", "recycle") if lot.get(f)]
+
+        simd_lot_id = lot.get("id")
         lot_id = store.add_lot(coin_id, tok, cost, buy_price, ts, origin)
-        # update trail if armed
+
+        if simd_lot_id is not None:
+            simd_id_to_jupiter_id[simd_lot_id] = lot_id
+
+        # levels_to: queue for second pass
+        simd_levels_to = lot.get("levels_to")
+        if simd_levels_to is not None:
+            lots_with_levels.append((lot_id, int(simd_levels_to)))
+
         if trail_armed:
             store.update_lot_trail(lot_id, trail_armed, trail_peak)
+
+        note = ""
+        if audit_flags:
+            note = f"  [{'+'.join(audit_flags)}]"
 
         print(
             f"[lot]  id={lot_id:4d}  tok={tok:.4f}  cost=${cost:.2f}"
             f"  price=${buy_price:.6f}  origin={origin}"
             + (f"  trail@{trail_peak:.6f}" if trail_armed else "")
+            + note
         )
         inserted += 1
         total_cost += cost
+
+    # Second pass: wire levels_to using the SIMD-id → Jupiter-id map.
+    linked = 0
+    unresolved = 0
+    for jupiter_lot_id, simd_target in lots_with_levels:
+        jupiter_target = simd_id_to_jupiter_id.get(simd_target)
+        if jupiter_target is None:
+            print(f"[warn] levels_to={simd_target} (SIMD id) not found in migrated lots -- skipped")
+            unresolved += 1
+            continue
+        store._c.execute(
+            "UPDATE lots SET levels_to = ? WHERE id = ?", (jupiter_target, jupiter_lot_id)
+        )
+        store._c.commit()
+        print(f"[link] lot {jupiter_lot_id} → levels_to {jupiter_target}")
+        linked += 1
+
+    if linked or unresolved:
+        print(f"[link] {linked} pairing link(s) set, {unresolved} unresolved")
 
     # Record the deployed capital as a deposit so the ledger balance is correct.
     if inserted > 0:
@@ -163,6 +214,9 @@ def migrate(simd_dir: str, slug: str, label: str, mint: str,
         f"\n[done] {inserted} lot(s) inserted, {skipped} skipped."
         f" Total cost basis: ${total_cost:.2f}"
         f" -- coin '{slug}' is {status.upper()} in Jupiter."
+        + (f" ({linked} pairing link(s) wired)" if linked else "")
+        + ("\n[note] Fields NOT migrated: stuck_since, grid_pair, id (reassigned),"
+           " starter/crash/recycle flags (audit-only, no Jupiter column)." if inserted else "")
     )
     if status == "paper":
         print(
