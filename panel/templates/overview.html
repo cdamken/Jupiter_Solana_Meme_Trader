@@ -13,59 +13,67 @@
   {% set growth_pct = 0 %}
 {% endif %}
 
-<!-- Fleet health strip -->
-<div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px;">
-  <div class="card" style="flex:1; min-width:110px; text-align:center;">
-    <div class="muted" style="font-size:0.8em;">Live</div>
-    <div style="font-size:2em; color:#3fb950; font-weight:bold;">{{ live_coins | length }}</div>
-  </div>
-  <div class="card" style="flex:1; min-width:110px; text-align:center;">
-    <div class="muted" style="font-size:0.8em;">Paused</div>
-    <div style="font-size:2em; color:#d29922; font-weight:bold;">{{ paused_coins | length }}</div>
-  </div>
-  <div class="card" style="flex:1; min-width:110px; text-align:center;">
-    <div class="muted" style="font-size:0.8em;">Paper</div>
-    <div style="font-size:2em; color:#58a6ff; font-weight:bold;">{{ paper_coins | length }}</div>
-  </div>
-  <div class="card" style="flex:1; min-width:110px; text-align:center;">
-    <div class="muted" style="font-size:0.8em;">Open lots</div>
-    <div style="font-size:2em; color:#f0f6fc; font-weight:bold;">{{ coins | sum(attribute='lots') }}</div>
-  </div>
-  <div class="card" style="flex:1; min-width:130px; text-align:center;">
-    <div class="muted" style="font-size:0.8em;">Realized P&L</div>
-    <div style="font-size:1.6em; font-weight:bold;" class="{{ 'pos' if total_pnl >= 0 else 'neg' }}">${{ "%.2f"|format(total_pnl) }}</div>
-  </div>
-  <div class="card" style="flex:2; min-width:220px;">
-    <div class="muted" style="font-size:0.8em;">Growth</div>
-    <div style="display:flex; gap:10px; align-items:flex-end; flex-wrap:wrap; margin-top:4px;">
-      <div><span class="muted" style="font-size:0.75em;">in</span>
-        <span style="font-size:1.1em;">${{ "%.2f"|format(total_deposited) }}</span></div>
-      <div style="color:#8b949e;">→</div>
-      <div><span class="muted" style="font-size:0.75em;">now</span>
-        <span style="font-size:1.1em;">${{ "%.2f"|format(balance + total_deployed) }}</span></div>
-      <div style="font-size:1.6em; font-weight:bold;" class="{{ 'pos' if growth_pct >= 0 else 'neg' }}">
-        {{ "%+.1f%%"|format(growth_pct) }}
+<!-- Realized profit grid (SIMD-style: coin cards + TOTAL) -->
+<div class="card">
+  <h2>Realized profit</h2>
+  <div style="display:flex; gap:12px; flex-wrap:wrap;">
+    {% for c in coins %}
+    <div style="flex:1; min-width:130px; background:#0d1117; border:1px solid #21262d;
+                border-radius:6px; padding:10px 14px;">
+      <div style="font-size:1.05em; color:#f0f6fc; font-weight:bold; margin-bottom:2px;">
+        <a href="/coin/{{ c.id }}" style="color:#f0f6fc;">{{ c.label }}</a>
       </div>
+      <div class="muted" style="font-size:0.8em; margin-bottom:6px;">
+        {{ sparklines.get(c.id, []) | selectattr("side", "eq", "buy")  | list | length }} buys
+        &nbsp;·&nbsp;
+        {{ sparklines.get(c.id, []) | selectattr("side", "eq", "sell") | list | length }} sells
+      </div>
+      <div style="font-size:1.4em; font-weight:bold;"
+           class="{{ 'pos' if c.realized >= 0 else 'neg' }}">${{ "%.2f"|format(c.realized) }}</div>
+      <span class="badge badge-{{ c.status }}" style="margin-top:6px; display:inline-block;">{{ c.status }}</span>
+    </div>
+    {% endfor %}
+    <!-- TOTAL -->
+    <div style="flex:1; min-width:130px; background:#0d1117; border:1px solid #30363d;
+                border-radius:6px; padding:10px 14px;">
+      <div style="font-size:1.05em; color:#8b949e; font-weight:bold; margin-bottom:2px;">TOTAL</div>
+      <div class="muted" style="font-size:0.8em; margin-bottom:6px;">all coins</div>
+      <div style="font-size:1.4em; font-weight:bold;"
+           class="{{ 'pos' if total_pnl >= 0 else 'neg' }}">${{ "%.2f"|format(total_pnl) }}</div>
     </div>
   </div>
 </div>
 
-<!-- Scheduler status bar -->
-<div class="card" style="margin-bottom:16px; padding:8px 16px;">
-  <div style="display:flex; gap:24px; flex-wrap:wrap; align-items:center; font-size:0.9em;">
+<!-- Growth card -->
+<div class="card">
+  <h2>Growth (deposited vs fleet value now)</h2>
+  <div style="display:flex; gap:24px; flex-wrap:wrap; align-items:flex-end;">
     <div>
-      <span class="muted">Last trade: </span>
-      {% if last_trade_ts %}
-        <span id="last-trade-age"></span>
-        <span class="muted" style="font-size:0.8em;">({{ last_trade_ts }})</span>
-      {% else %}
-        <span class="muted">no trades yet</span>
-      {% endif %}
+      <div class="muted" style="font-size:0.8em;">deposited</div>
+      <div style="font-size:1.4em; color:#f0f6fc;">${{ "%.2f"|format(total_deposited) }}</div>
     </div>
-    <div><span class="muted">Panel: </span><span class="pos">running</span></div>
-    <div class="muted" style="font-size:0.8em;">
-      Scheduler: <code>./trader.sh status</code> or <a href="/health">/health</a>
+    <div style="color:#8b949e; font-size:1.4em;">→</div>
+    <div>
+      <div class="muted" style="font-size:0.8em;">fleet value now (balance + deployed)</div>
+      <div style="font-size:1.4em; color:#f0f6fc;">${{ "%.2f"|format(balance + total_deployed) }}</div>
     </div>
+    <div>
+      <div class="muted" style="font-size:0.8em;">growth</div>
+      <div style="font-size:1.6em; font-weight:bold;"
+           class="{{ 'pos' if growth_pct >= 0 else 'neg' }}">
+        ${{ "%.2f"|format(balance + total_deployed - total_deposited) }}
+        ({{ "%+.1f%%"|format(growth_pct) }})
+      </div>
+    </div>
+  </div>
+  <div class="muted" style="margin-top:8px; font-size:0.8em;">
+    Fleet value = USDC balance (${{ "%.2f"|format(balance) }}) + deployed capital (${{ "%.2f"|format(total_deployed) }}).
+    Last trade:
+    {% if last_trade_ts %}
+      <span id="last-trade-age"></span> ({{ last_trade_ts }})
+    {% else %}no trades yet{% endif %}
+    &nbsp;·&nbsp; Panel: <span class="pos">running</span>
+    &nbsp;·&nbsp; Scheduler: <a href="/health">/health</a>
   </div>
 </div>
 
@@ -74,8 +82,8 @@
 (function(){
   var ts = {{ last_trade_ts }};
   function fmt(s) {
-    if (s < 60)   return s + 's ago';
-    if (s < 3600) return Math.floor(s/60) + 'm ago';
+    if (s < 60)    return s + 's ago';
+    if (s < 3600)  return Math.floor(s/60) + 'm ago';
     if (s < 86400) return Math.floor(s/3600) + 'h ago';
     return Math.floor(s/86400) + 'd ago';
   }
@@ -85,80 +93,72 @@
 </script>
 {% endif %}
 
-<!-- Per-coin cards with sparklines -->
-<div style="display:flex; gap:14px; flex-wrap:wrap; margin-bottom:16px;">
+<!-- Per-coin price chart: one full-width card per coin (SIMD style) -->
 {% for c in coins %}
 {% set spark = sparklines.get(c.id, []) %}
-<div class="card" style="flex:1; min-width:260px; max-width:380px;">
-  <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px;">
-    <div>
-      <a href="/coin/{{ c.id }}" style="font-size:1.05em; color:#f0f6fc; font-weight:bold;">{{ c.label }}</a>
-      <span class="badge badge-{{ c.status }}" style="margin-left:6px;">{{ c.status }}</span>
-    </div>
-    <div style="text-align:right;">
-      <div class="{{ 'pos' if c.realized >= 0 else 'neg' }}" style="font-size:1.1em; font-weight:bold;">
-        ${{ "%.2f"|format(c.realized) }}
-      </div>
-      <div class="muted" style="font-size:0.75em;">realized P&L</div>
-    </div>
+{% if spark and spark | length > 1 %}
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
+    <h2 style="margin:0;">Price with buys &amp; sells — <a href="/coin/{{ c.id }}">{{ c.label }}</a></h2>
+    <span class="muted" style="font-size:0.8em;">{{ spark | length }} trades shown</span>
   </div>
 
-  <!-- Sparkline SVG -->
-  {% if spark and spark | length > 1 %}
-  <div style="margin-bottom:8px;">
+  {# Build SVG chart inline with Jinja2 -- time on X axis, price on Y #}
   {% set prices = spark | map(attribute='price') | list %}
-  {% set pmin = prices | min %}
-  {% set pmax = prices | max %}
-  {% set prange = pmax - pmin if pmax > pmin else pmax * 0.01 if pmax > 0 else 1 %}
-  {% set W = 300 %}
-  {% set H = 50 %}
-  {% set n = spark | length %}
-  <svg viewBox="0 0 {{ W }} {{ H }}" width="100%" height="{{ H }}" xmlns="http://www.w3.org/2000/svg"
-       style="display:block; overflow:visible;">
-    <!-- price line -->
+  {% set times  = spark | map(attribute='ts')    | list %}
+  {% set pmin_raw = prices | min %}
+  {% set pmax_raw = prices | max %}
+  {% set prange_raw = pmax_raw - pmin_raw if pmax_raw > pmin_raw else pmax_raw * 0.01 if pmax_raw > 0 else 1e-9 %}
+  {# add 6% padding top/bottom like SIMD #}
+  {% set pmin = pmin_raw - prange_raw * 0.06 %}
+  {% set pmax = pmax_raw + prange_raw * 0.06 %}
+  {% set prange = pmax - pmin %}
+  {% set tmin = times | min %}
+  {% set tmax = times | max %}
+  {% set tspan = tmax - tmin if tmax > tmin else 1 %}
+  {% set W = 900 %}
+  {% set H = 120 %}
+  {% set padL = 8 %}{% set padR = 8 %}{% set padT = 14 %}{% set padB = 24 %}
+
+  <svg viewBox="0 0 {{ W }} {{ H }}" width="100%" style="max-width:100%;height:auto;display:block;"
+       xmlns="http://www.w3.org/2000/svg" font-family="monospace">
+    {# Price line #}
     <polyline
-      fill="none" stroke="#58a6ff" stroke-width="1.5"
-      points="{% for pt in spark %}{{ (loop.index0 / (n-1) * (W-8) + 4) | round(1) }},{{ (H - 4 - ((pt.price - pmin) / prange * (H-8))) | round(1) }} {% endfor %}"
+      fill="none" stroke="#58a6ff" stroke-width="1.6"
+      points="{% for pt in spark %}{{ (padL + (pt.ts - tmin) / tspan * (W - padL - padR)) | round(1) }},{{ (padT + (1 - (pt.price - pmin) / prange) * (H - padT - padB)) | round(1) }} {% endfor %}"
     />
-    <!-- buy/sell dots -->
+    {# Buy/sell dots #}
     {% for pt in spark %}
-    {% set x = (loop.index0 / (n-1) * (W-8) + 4) | round(1) %}
-    {% set y = (H - 4 - ((pt.price - pmin) / prange * (H-8))) | round(1) %}
-    <circle cx="{{ x }}" cy="{{ y }}" r="3"
-      fill="{{ '#3fb950' if pt.side == 'buy' else '#f85149' }}"
-      opacity="0.9">
-      <title>{{ pt.side }} ${{ "%.6f"|format(pt.price) }}</title>
+    {% set cx = (padL + (pt.ts - tmin) / tspan * (W - padL - padR)) | round(1) %}
+    {% set cy = (padT + (1 - (pt.price - pmin) / prange) * (H - padT - padB)) | round(1) %}
+    <circle cx="{{ cx }}" cy="{{ cy }}" r="4.5"
+      fill="{{ '#3fb950' if pt.side == 'buy' else '#d29922' }}"
+      stroke="#0d1117" stroke-width="1.2">
+      <title>{{ pt.side }} ${{ "%.7f"|format(pt.price) }}</title>
     </circle>
     {% endfor %}
-    <!-- price labels -->
-    <text x="2" y="{{ H - 2 }}" font-size="8" fill="#8b949e">${{ "%.5f"|format(pmin) }}</text>
-    <text x="2" y="10"          font-size="8" fill="#8b949e">${{ "%.5f"|format(pmax) }}</text>
+    {# Price labels Y axis #}
+    <text x="{{ padL }}" y="10"            font-size="10" fill="#8b949e">${{ "%.7f"|format(pmax_raw) }}</text>
+    <text x="{{ padL }}" y="{{ H - padB + 8 }}" font-size="10" fill="#8b949e">${{ "%.7f"|format(pmin_raw) }}</text>
+    {# Date labels X axis - first and last #}
+    <text x="{{ padL }}" y="{{ H - 4 }}" font-size="10" fill="#8b949e">{{ spark[0].ts | int | datefmt }}</text>
+    <text x="{{ W - padR }}" y="{{ H - 4 }}" font-size="10" fill="#8b949e" text-anchor="end">{{ spark[-1].ts | int | datefmt }}</text>
   </svg>
-  <div style="display:flex; gap:12px; font-size:0.75em; color:#8b949e; margin-top:2px;">
-    <span style="color:#3fb950;">● buy</span>
-    <span style="color:#f85149;">● sell</span>
-    <span>{{ spark | length }} trades</span>
-  </div>
-  </div>
-  {% else %}
-  <div style="height:50px; display:flex; align-items:center; justify-content:center; color:#8b949e; font-size:0.8em; border:1px dashed #30363d; border-radius:4px; margin-bottom:8px;">
-    no trades yet
-  </div>
-  {% endif %}
 
-  <div style="display:flex; gap:16px; font-size:0.85em;">
-    <div><span class="muted">Lots: </span>{{ c.lots }}</div>
-    <div><span class="muted">Deployed: </span>${{ "%.2f"|format(c.deployed) }}</div>
+  <div style="font-size:0.8em; color:#8b949e; margin-top:4px;">
+    <span style="color:#3fb950;">&#9679;</span> buy &nbsp;&nbsp;
+    <span style="color:#d29922;">&#9679;</span> sell &nbsp;·&nbsp;
+    hover a dot for side &amp; price
     {% if lots_age.get(c.id) %}
+    &nbsp;·&nbsp; oldest open lot:
     {% set d = lots_age[c.id] %}
-    <div><span class="muted">Oldest: </span>
-      <span style="color:{% if d >= 7 %}#f85149{% elif d >= 3 %}#d29922{% else %}#c9d1d9{% endif %};">{{ d }}d</span>
-    </div>
+    <span style="color:{% if d >= 7 %}#f85149{% elif d >= 3 %}#d29922{% else %}#8b949e{% endif %};">{{ d }}d</span>
     {% endif %}
+    &nbsp;·&nbsp; {{ c.lots }} open lot(s) · deployed ${{ "%.2f"|format(c.deployed) }}
   </div>
 </div>
+{% endif %}
 {% endfor %}
-</div>
 
 <!-- Recent ledger activity -->
 <div class="card">

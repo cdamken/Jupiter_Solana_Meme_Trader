@@ -30,6 +30,15 @@ from store.store import Store
 app = Flask(__name__, template_folder="templates")
 app.secret_key = os.environ.get("PANEL_SECRET", "change-me-in-production")
 
+import datetime as _dt
+
+@app.template_filter("datefmt")
+def _datefmt(ts):
+    try:
+        return _dt.datetime.utcfromtimestamp(float(ts)).strftime("%m-%d")
+    except Exception:
+        return ""
+
 def _store() -> Store:
     return Store(cfg.DB_PATH)
 
@@ -238,12 +247,15 @@ def overview():
     sparklines = {}
     for s in summaries:
         rows = store._c.execute(
-            "SELECT ts, price, side FROM trades WHERE coin_id = ? ORDER BY ts ASC LIMIT 30",
+            "SELECT strftime('%s', ts) AS ts_unix, price, side"
+            " FROM trades WHERE coin_id = ? ORDER BY ts ASC LIMIT 30",
             (s["id"],),
         ).fetchall()
         if rows:
-            sparklines[s["id"]] = [{"ts": r["ts"], "price": r["price"], "side": r["side"]}
-                                    for r in rows]
+            sparklines[s["id"]] = [
+                {"ts": float(r["ts_unix"]), "price": float(r["price"]), "side": r["side"]}
+                for r in rows if r["price"] and r["ts_unix"]
+            ]
 
     balance = store.usdc_balance()
     dep_row = store._c.execute(
