@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS coins (
     -- quote is ALWAYS USDC (hard rule in code); intentionally not a column.
     status        TEXT NOT NULL DEFAULT 'paper'
                   CHECK (status IN ('paper','live','paused')),
+    decimals      INTEGER NOT NULL DEFAULT 6,  -- token decimal places (6 for pump.fun, 9 for SOL)
     created_at    TEXT NOT NULL DEFAULT (datetime('now')),
     migrated_from TEXT
 );

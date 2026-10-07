@@ -51,10 +51,12 @@ class Store:
         return self._c.execute("SELECT * FROM coins").fetchall()
 
     def add_coin(self, slug: str, label: str, mint: str,
-                 status: str = "paper", migrated_from: str | None = None) -> int:
+                 status: str = "paper", migrated_from: str | None = None,
+                 decimals: int = 6) -> int:
         cur = self._c.execute(
-            "INSERT INTO coins (slug, label, mint, status, migrated_from) VALUES (?,?,?,?,?)",
-            (slug, label, mint, status, migrated_from),
+            "INSERT INTO coins (slug, label, mint, status, migrated_from, decimals)"
+            " VALUES (?,?,?,?,?,?)",
+            (slug, label, mint, status, migrated_from, decimals),
         )
         self._c.commit()
         return cur.lastrowid
@@ -146,8 +148,14 @@ class Store:
             self._ledger_entry(amount, "release", coin_id=coin_id)
 
     def usdc_commit_buy(self, amount: float, coin_id: int, txsig: str):
-        """Mark a buy as executed (reservation already applied the debit)."""
+        """Mark a buy as executed (reservation already applied the debit).
+
+        Writes a delta=0 'buy' marker to usdc_ledger so that reconcile_reserves()
+        can distinguish a completed buy (reserve + buy marker) from an orphaned
+        one (reserve only, no follow-up entry).
+        """
         with self._c:
+            self._ledger_entry(0.0, "buy", coin_id=coin_id, txsig=txsig)
             self._c.execute(
                 "INSERT INTO trades (coin_id, ts, mode, side, signal, price, tokens, usd, pnl_pct, txsig)"
                 " SELECT c.id, datetime('now'), c.status, 'buy', 'grid', 0, 0, ?, null, ?"
@@ -201,3 +209,46 @@ class Store:
             (coin_id, deployed_usd, max_usd),
         )
         self._c.commit()
+
+    # ---- startup reconciliation ----
+
+    def reconcile_reserves(self) -> int:
+        """Release any 'reserve' ledger entries orphaned by a crash.
+
+        A reserve entry is orphaned when there is no later 'release' or 'buy'
+        entry for the same coin_id, meaning the scheduler crashed after reserving
+        USDC but before committing or releasing it. Each orphan is released so the
+        balance is restored and the USDC is spendable again.
+
+        Returns the number of orphaned entries released.
+        """
+        import logging
+        log = logging.getLogger("store.reconcile")
+
+        # Find every reserve entry that has no subsequent release or buy for its coin
+        orphans = self._c.execute(
+            """
+            SELECT r.id, r.coin_id, ABS(r.delta) AS amount
+            FROM usdc_ledger r
+            WHERE r.kind = 'reserve'
+              AND NOT EXISTS (
+                SELECT 1 FROM usdc_ledger f
+                WHERE f.coin_id = r.coin_id
+                  AND f.kind IN ('release', 'buy')
+                  AND f.id > r.id
+              )
+            ORDER BY r.id ASC
+            """
+        ).fetchall()
+
+        for row in orphans:
+            amount = row["amount"]
+            coin_id = row["coin_id"]
+            log.warning(
+                "reconcile: releasing orphaned reserve id=%d coin=%s amount=%.2f",
+                row["id"], coin_id, amount,
+            )
+            with self._c:
+                self._ledger_entry(amount, "release", coin_id=coin_id)
+
+        return len(orphans)

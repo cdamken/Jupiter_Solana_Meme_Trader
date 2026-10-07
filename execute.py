@@ -183,7 +183,8 @@ def paper_sell(store, coin_id: int, lot: dict, price: float, mode: str = "paper"
 
 def live_buy(store, coin_id: int, usd: float, price: float, ts: float,
              rpc_url: str, keypair_path: str, quote_mint: str,
-             token_mint: str, gas_reserve_lamports: int) -> str:
+             token_mint: str, gas_reserve_lamports: int,
+             token_decimals: int = 6) -> str:
     """Execute a real buy swap via Jupiter. Returns txsig or '' on failure."""
     kp = load_keypair(keypair_path)
     wallet = str(kp.pubkey())
@@ -249,7 +250,7 @@ def live_buy(store, coin_id: int, usd: float, price: float, ts: float,
         store.usdc_release(usd, coin_id)
         return ""
 
-    tokens_out = int(quote.get("outAmount", 0)) / 1e6
+    tokens_out = int(quote.get("outAmount", 0)) / (10 ** token_decimals)
     lot_id = store.add_lot(coin_id, tokens_out, usd, eff_price, ts, "live")
     store.usdc_commit_buy(usd, coin_id, txsig)
     log.info("[live] BUY coin=%d tokens=%.4f price=%.6f usd=%.2f lot=%d txsig=%s",
@@ -259,7 +260,8 @@ def live_buy(store, coin_id: int, usd: float, price: float, ts: float,
 
 def live_sell(store, coin_id: int, lot: dict, price: float,
               rpc_url: str, keypair_path: str, quote_mint: str,
-              token_mint: str, gas_reserve_lamports: int) -> str:
+              token_mint: str, gas_reserve_lamports: int,
+              token_decimals: int = 6) -> str:
     """Execute a real sell swap via Jupiter. Returns txsig or '' on failure."""
     if not revalidate_effective_sale(lot, price):
         log.warning("live_sell: hard rule blocks lot=%d at price=%.6f", lot["id"], price)
@@ -274,7 +276,7 @@ def live_sell(store, coin_id: int, lot: dict, price: float,
         return ""
 
     tokens = lot["tokens"]
-    in_amount = int(tokens * 1e6)       # assumes 6 decimals; adjust per token if needed
+    in_amount = int(tokens * 10 ** token_decimals)
 
     quote_url = (
         f"{JUPITER_QUOTE_URL}?inputMint={token_mint}&outputMint={quote_mint}"

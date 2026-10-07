@@ -112,13 +112,17 @@ def coin_add():
     slug  = request.form.get("slug", "").strip().lower()
     label = request.form.get("label", "").strip()
     mint  = request.form.get("mint", "").strip()
+    try:
+        decimals = int(request.form.get("decimals", "6") or "6")
+    except ValueError:
+        decimals = 6
     if not slug or not mint:
         flash("slug and mint are required", "error")
         return redirect(url_for("dashboard"))
     store = _store()
     try:
-        store.add_coin(slug, label or slug.upper(), mint)
-        flash(f"Coin '{slug}' added (paper mode)", "ok")
+        store.add_coin(slug, label or slug.upper(), mint, decimals=decimals)
+        flash(f"Coin '{slug}' added (paper mode, decimals={decimals})", "ok")
     except Exception as e:
         flash(f"Error: {e}", "error")
     return redirect(url_for("dashboard"))

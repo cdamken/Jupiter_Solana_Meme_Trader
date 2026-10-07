@@ -148,6 +148,7 @@ def tick_coin(store: Store, coin: dict, force_mode: str | None = None):
                 quote_mint=config.QUOTE_MINT,
                 token_mint=mint,
                 gas_reserve_lamports=config.GAS_RESERVE_LAMPORTS,
+                token_decimals=coin.get("decimals", 6),
             )
         else:
             txsig = paper_sell(store, coin_id, lot, price, mode="paper")
@@ -166,6 +167,7 @@ def tick_coin(store: Store, coin: dict, force_mode: str | None = None):
                 quote_mint=config.QUOTE_MINT,
                 token_mint=mint,
                 gas_reserve_lamports=config.GAS_RESERVE_LAMPORTS,
+                token_decimals=coin.get("decimals", 6),
             )
         else:
             txsig = paper_buy(store, coin_id, decision["buy_usd"], price, ts)
@@ -194,6 +196,9 @@ def main():
     force_mode = "paper" if args.paper else None
 
     store = Store(config.DB_PATH)
+    released = store.reconcile_reserves()
+    if released:
+        log.warning("Startup reconciliation: released %d orphaned reserve(s)", released)
     log.info("Scheduler started. DB=%s tick=%ds mode=%s",
              config.DB_PATH, TICK_INTERVAL, force_mode or "per-coin")
 

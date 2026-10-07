@@ -116,6 +116,35 @@ with tempfile.TemporaryDirectory() as d:
     cap = s.get_capital(coin_id)
     check("capital upsert deployed", cap["deployed_usd"], 75.0)
 
+    # ---- coin decimals ----
+    print("\n[coin decimals]")
+    coin_id9 = s.add_coin("wsol", "Wrapped SOL", "So11111111111111111111111111111111111111112",
+                           decimals=9)
+    wsol = s.get_coin("wsol")
+    check_true("wsol coin found", wsol is not None)
+    check("wsol decimals=9", wsol["decimals"], 9)
+    simd = s.get_coin("simd")
+    check("simd decimals default 6", simd["decimals"], 6)
+
+    # ---- reconcile_reserves ----
+    print("\n[reconcile_reserves]")
+    s2 = Store(db)
+    s2.usdc_deposit(200.0)
+    s2.usdc_reserve(40.0, coin_id)      # orphan: no matching release/buy follows
+    s2.usdc_reserve(20.0, coin_id9)     # orphan #2
+    # Running balance: 100 (deposit) - 30 (reserve) + 30 (release)
+    #   - 25 (reserve) + 0 (commit_buy marker) + 26 (commit_sell)
+    #   + 200 (deposit) - 40 (orphan) - 20 (orphan) = 241
+    bal_before = s2.usdc_balance()
+    check("balance after two orphaned reserves", round(bal_before, 2), 241.0)
+    released = s2.reconcile_reserves()
+    check("reconcile released 2 orphans", released, 2)
+    bal_after = s2.usdc_balance()
+    check("balance restored after reconcile", round(bal_after, 2), 301.0)
+    # A second reconcile should find nothing new
+    released2 = s2.reconcile_reserves()
+    check("second reconcile: nothing to release", released2, 0)
+
 print()
 if FAILURES:
     for f in FAILURES:
