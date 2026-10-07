@@ -80,13 +80,15 @@
     <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;">
       <div>
         <div class="muted" style="font-size:0.8em; margin-bottom:2px;">Key</div>
-        <select name="key" style="width:200px;">
-          {% for p in catalog %}
-            {% if p.scope in ('coin-allowed', 'coin-only') %}
-            <option value="{{ p.key }}">{{ p.key }}</option>
-            {% endif %}
-          {% endfor %}
-        </select>
+        {% set coin_keys = catalog | selectattr("scope", "in", ["coin-allowed", "coin-only"]) | list %}
+        {% if coin_keys %}
+        <input type="text" name="key" list="param-keys" style="width:200px;" placeholder="BUY_STEP_PCT">
+        <datalist id="param-keys">
+          {% for p in coin_keys %}<option value="{{ p.key }}">{{ p.label }}</option>{% endfor %}
+        </datalist>
+        {% else %}
+        <input type="text" name="key" style="width:200px;" placeholder="BUY_STEP_PCT">
+        {% endif %}
       </div>
       <div>
         <div class="muted" style="font-size:0.8em; margin-bottom:2px;">Value</div>
