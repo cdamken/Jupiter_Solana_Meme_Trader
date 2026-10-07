@@ -1,0 +1,4 @@
+flask>=3.0,<4
+solders>=0.20
+solana>=0.34
+requests>=2.31

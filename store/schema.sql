@@ -118,7 +118,9 @@ CREATE TABLE IF NOT EXISTS lots (
     ts           REAL NOT NULL,                 -- epoch seconds (native book dating)
     origin       TEXT NOT NULL,                 -- grid|prebuy|reserve|failed|topup|ladder|...
     levels_to    INTEGER REFERENCES lots(id) ON DELETE SET NULL,  -- pairing link (nullable self-FK)
-    group_id     INTEGER                        -- pairing group (nullable)
+    group_id     INTEGER,                       -- pairing group (nullable)
+    trail_armed  INTEGER NOT NULL DEFAULT 0,   -- 1 = trailing sell armed
+    trail_peak   REAL    NOT NULL DEFAULT 0    -- highest price seen while armed
 );
 CREATE INDEX IF NOT EXISTS ix_lots_coin ON lots(coin_id);
 
