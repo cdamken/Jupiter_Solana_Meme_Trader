@@ -21,6 +21,16 @@ from engine import grid_decision, relative_ceiling, price_gate
 from execute import (
     fetch_price, paper_buy, paper_sell, live_buy, live_sell,
 )
+import alerts as _alerts
+
+def _smtp() -> dict:
+    return dict(
+        smtp_host=config.SMTP_HOST,
+        smtp_port=config.SMTP_PORT,
+        smtp_user=config.SMTP_USER,
+        smtp_pass=config.SMTP_PASS,
+        to=config.ALERT_EMAIL,
+    )
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,6 +43,7 @@ TICK_INTERVAL  = 60          # seconds between ticks (one full coin sweep)
 PRICE_WINDOW_S = 14 * 86400  # 14 days for ceiling percentile
 
 _running = True
+_no_price_streak: dict[int, int] = {}   # coin_id -> consecutive ticks without price
 
 
 def _stop(signum, _frame):
@@ -81,8 +92,12 @@ def tick_coin(store: Store, coin: dict, force_mode: str | None = None):
     # Fetch price
     price = fetch_price(mint)
     if price is None:
-        log.warning("coin=%d: no price, skipping tick", coin_id)
+        streak = _no_price_streak.get(coin_id, 0) + 1
+        _no_price_streak[coin_id] = streak
+        log.warning("coin=%d slug=%s: no price (streak=%d)", coin_id, coin["slug"], streak)
+        _alerts.alert_no_price(coin["slug"], streak, **_smtp())
         return
+    _no_price_streak[coin_id] = 0
 
     # Price gate (reject outlier ticks)
     # State stored inline per-tick via a simple DB field would need a table;
@@ -123,9 +138,10 @@ def tick_coin(store: Store, coin: dict, force_mode: str | None = None):
         store.update_lot_trail(lot["id"], armed, peak)
 
     # Sells
+    slug = coin["slug"]
     for lot in decision["sells"]:
         if mode == "live":
-            live_sell(
+            txsig = live_sell(
                 store, coin_id, lot, price,
                 rpc_url=config.RPC_URL,
                 keypair_path=config.KEYPAIR_PATH,
@@ -134,12 +150,16 @@ def tick_coin(store: Store, coin: dict, force_mode: str | None = None):
                 gas_reserve_lamports=config.GAS_RESERVE_LAMPORTS,
             )
         else:
-            paper_sell(store, coin_id, lot, price, mode="paper")
+            txsig = paper_sell(store, coin_id, lot, price, mode="paper")
+        if txsig:
+            pnl = (price - lot["buy_price"]) / lot["buy_price"] * 100.0
+            _alerts.alert_trade("sell", slug, lot["tokens"], price,
+                                lot["tokens"] * price, pnl, mode, **_smtp())
 
     # Buy
     if decision["buy_usd"] > 0:
         if mode == "live":
-            live_buy(
+            txsig = live_buy(
                 store, coin_id, decision["buy_usd"], price, ts,
                 rpc_url=config.RPC_URL,
                 keypair_path=config.KEYPAIR_PATH,
@@ -148,7 +168,11 @@ def tick_coin(store: Store, coin: dict, force_mode: str | None = None):
                 gas_reserve_lamports=config.GAS_RESERVE_LAMPORTS,
             )
         else:
-            paper_buy(store, coin_id, decision["buy_usd"], price, ts)
+            txsig = paper_buy(store, coin_id, decision["buy_usd"], price, ts)
+        if txsig:
+            tokens_approx = decision["buy_usd"] / price
+            _alerts.alert_trade("buy", slug, tokens_approx, price,
+                                decision["buy_usd"], None, mode, **_smtp())
 
         # Update deployed capital
         new_deployed = deployed + decision["buy_usd"]
@@ -181,8 +205,9 @@ def main():
         for coin in active:
             try:
                 tick_coin(store, dict(coin), force_mode=force_mode)
-            except Exception:
+            except Exception as e:
                 log.exception("Error ticking coin=%d slug=%s", coin["id"], coin["slug"])
+                _alerts.alert_error(coin["slug"], str(e), **_smtp())
         elapsed = time.time() - tick_start
         sleep_s = max(0.0, TICK_INTERVAL - elapsed)
         log.info("Tick done in %.1fs, sleeping %.1fs", elapsed, sleep_s)
