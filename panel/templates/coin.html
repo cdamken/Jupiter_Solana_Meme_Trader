@@ -107,18 +107,55 @@
 <!-- Effective config -->
 <div class="card">
   <h2>Effective config (fleet defaults + overrides)</h2>
+  {% set cat_map = {} %}
+  {% for p in catalog %}{% if cat_map.update({p.key: p}) %}{% endif %}{% endfor %}
   {% if cfg %}
   <table>
-    <thead><tr><th>Key</th><th>Value</th></tr></thead>
+    <thead><tr><th>Key</th><th>Label</th><th>Value</th><th>Default</th><th>Range</th></tr></thead>
     <tbody>
     {% for k, v in cfg.items()|sort %}
-    <tr><td>{{ k }}</td><td>{{ v }}</td></tr>
+    {% set p = cat_map.get(k) %}
+    <tr title="{{ p.help if p else '' }}">
+      <td style="font-family:monospace; font-size:0.85em;">{{ k }}</td>
+      <td>{{ p.label if p else '-' }}</td>
+      <td><strong>{{ v }}</strong></td>
+      <td class="muted">{{ p.default_val if p else '-' }}</td>
+      <td class="muted" style="font-size:0.8em; white-space:nowrap;">
+        {% if p and p.min is not none and p.max is not none %}{{ p.min }} – {{ p.max }}{% else %}-{% endif %}
+      </td>
+    </tr>
     {% endfor %}
     </tbody>
   </table>
+  <p class="muted" style="font-size:0.8em; margin-top:6px;">Hover a row to see its description. Full details in the Parameter reference below.</p>
   {% else %}
   <p class="muted">No fleet defaults configured yet.</p>
   {% endif %}
+</div>
+
+<!-- Parameter reference -->
+<div class="card">
+  <h2>Parameter reference</h2>
+  <p class="muted" style="font-size:0.85em; margin-bottom:8px;">All parameters available for coin overrides. Fleet-only parameters can only be changed in fleet defaults.</p>
+  <table>
+    <thead><tr><th>Key</th><th>Label</th><th>Scope</th><th>Type</th><th>Default</th><th>Recommended</th><th>Range</th><th>Description</th></tr></thead>
+    <tbody>
+    {% for p in catalog|sort(attribute='key') %}
+    <tr style="{% if p.tier == 'locked-visible' %}opacity:0.55;{% endif %}">
+      <td style="font-family:monospace; font-size:0.85em;">{{ p.key }}</td>
+      <td>{{ p.label }}</td>
+      <td class="muted" style="font-size:0.8em;">{{ p.scope }}</td>
+      <td class="muted" style="font-size:0.8em;">{{ p.type }}</td>
+      <td>{{ p.default_val or '-' }}</td>
+      <td>{{ p.recommended or '-' }}</td>
+      <td class="muted" style="font-size:0.8em; white-space:nowrap;">
+        {% if p.min is not none and p.max is not none %}{{ p.min }} – {{ p.max }}{% else %}-{% endif %}
+      </td>
+      <td class="muted" style="font-size:0.85em;">{{ p.help }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
 </div>
 
 <!-- Recent trades -->
