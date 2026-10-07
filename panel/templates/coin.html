@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}Jupiter — {{ coin.slug }}{% endblock %}
+{% block content %}
+
+<div style="display:flex; align-items:center; gap:12px; margin-bottom:16px;">
+  <h2 style="margin:0;">{{ coin.label }} ({{ coin.slug }})</h2>
+  <span class="badge badge-{{ coin.status }}">{{ coin.status }}</span>
+</div>
+<p class="muted" style="font-size:0.8em; margin-top:-8px; margin-bottom:16px;">mint: {{ coin.mint }}</p>
+
+<!-- Status change -->
+<div class="card">
+  <h2>Status</h2>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    {% for s in ['paper', 'live', 'paused'] %}
+    <form action="/coin/{{ coin.id }}/status" method="post">
+      <input type="hidden" name="status" value="{{ s }}">
+      <button type="submit" class="btn {% if coin.status == s %}btn-green{% endif %}">{{ s }}</button>
+    </form>
+    {% endfor %}
+  </div>
+  {% if coin.status == 'live' %}
+  <p class="muted" style="margin-top:8px; font-size:0.8em;">Live mode: real swaps are being sent.</p>
+  {% endif %}
+</div>
+
+<!-- Open lots -->
+<div class="card">
+  <h2>Open lots ({{ lots | length }})</h2>
+  {% if lots %}
+  <table>
+    <thead><tr><th>ID</th><th>Tokens</th><th>Cost</th><th>Buy price</th><th>Origin</th><th>Trail</th></tr></thead>
+    <tbody>
+    {% for l in lots %}
+    <tr>
+      <td>{{ l.id }}</td>
+      <td>{{ "%.4f"|format(l.tokens) }}</td>
+      <td>${{ "%.2f"|format(l.cost) }}</td>
+      <td>${{ "%.6f"|format(l.buy_price) }}</td>
+      <td>{{ l.origin }}</td>
+      <td>{% if l.trail_armed %}armed @ ${{ "%.6f"|format(l.trail_peak) }}{% else %}off{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No open lots.</p>
+  {% endif %}
+</div>
+
+<!-- Config overrides -->
+<div class="card">
+  <h2>Config overrides</h2>
+  {% if overrides %}
+  <table style="margin-bottom:12px;">
+    <thead><tr><th>Key</th><th>Value</th><th>Author</th><th>Reason</th><th>Updated</th><th></th></tr></thead>
+    <tbody>
+    {% for o in overrides %}
+    <tr>
+      <td>{{ o.key }}</td>
+      <td>{{ o.value }}</td>
+      <td>{{ o.author }}</td>
+      <td class="muted">{{ o.reason }}</td>
+      <td class="muted" style="font-size:0.8em;">{{ o.ts }}</td>
+      <td>
+        <form action="/coin/{{ coin.id }}/config/delete" method="post">
+          <input type="hidden" name="key" value="{{ o.key }}">
+          <button type="submit" class="btn btn-red" style="padding:2px 8px;">x</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No overrides -- using fleet defaults for all parameters.</p>
+  {% endif %}
+
+  <form action="/coin/{{ coin.id }}/config" method="post">
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;">
+      <div>
+        <div class="muted" style="font-size:0.8em; margin-bottom:2px;">Key</div>
+        <select name="key" style="width:200px;">
+          {% for p in catalog %}
+            {% if p.scope in ('coin-allowed', 'coin-only') %}
+            <option value="{{ p.key }}">{{ p.key }}</option>
+            {% endif %}
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <div class="muted" style="font-size:0.8em; margin-bottom:2px;">Value</div>
+        <input type="text" name="value" style="width:120px;">
+      </div>
+      <div>
+        <div class="muted" style="font-size:0.8em; margin-bottom:2px;">Reason (required)</div>
+        <input type="text" name="reason" style="width:240px;" placeholder="why this override">
+      </div>
+      <input type="hidden" name="author" value="panel">
+      <button type="submit" class="btn btn-green">Save override</button>
+    </div>
+  </form>
+</div>
+
+<!-- Effective config -->
+<div class="card">
+  <h2>Effective config (fleet defaults + overrides)</h2>
+  {% if cfg %}
+  <table>
+    <thead><tr><th>Key</th><th>Value</th></tr></thead>
+    <tbody>
+    {% for k, v in cfg.items()|sort %}
+    <tr><td>{{ k }}</td><td>{{ v }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No fleet defaults configured yet.</p>
+  {% endif %}
+</div>
+
+<!-- Recent trades -->
+<div class="card">
+  <h2>Recent trades (last 50)</h2>
+  {% if trades %}
+  <table>
+    <thead><tr><th>Time</th><th>Mode</th><th>Side</th><th>Signal</th><th>Price</th><th>Tokens</th><th>USD</th><th>P&L</th></tr></thead>
+    <tbody>
+    {% for t in trades %}
+    <tr>
+      <td class="muted" style="font-size:0.8em;">{{ t.ts }}</td>
+      <td><span class="badge badge-{{ t.mode }}">{{ t.mode }}</span></td>
+      <td class="{{ 'pos' if t.side == 'sell' else '' }}">{{ t.side }}</td>
+      <td>{{ t.signal or '-' }}</td>
+      <td>${{ "%.6f"|format(t.price) if t.price else '-' }}</td>
+      <td>{{ "%.4f"|format(t.tokens) if t.tokens else '-' }}</td>
+      <td>${{ "%.2f"|format(t.usd) if t.usd else '-' }}</td>
+      <td class="{{ 'pos' if t.pnl_pct and t.pnl_pct > 0 else 'neg' if t.pnl_pct and t.pnl_pct < 0 else '' }}">
+        {{ "%.1f%%"|format(t.pnl_pct) if t.pnl_pct is not none else '-' }}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No trades yet.</p>
+  {% endif %}
+</div>
+
+<p><a href="/">&larr; Dashboard</a></p>
+{% endblock %}

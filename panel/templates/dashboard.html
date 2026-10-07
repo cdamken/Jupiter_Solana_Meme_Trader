@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Jupiter — Dashboard{% endblock %}
+{% block content %}
+
+<div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:16px;">
+  <div class="card" style="flex:1; min-width:180px;">
+    <div class="muted">USDC Balance</div>
+    <div style="font-size:1.6em; color:#f0f6fc;">${{ balance }}</div>
+  </div>
+  <div class="card" style="flex:1; min-width:180px;">
+    <div class="muted">Active coins</div>
+    <div style="font-size:1.6em; color:#f0f6fc;">
+      {{ coins | selectattr("status", "ne", "paused") | list | length }}
+      <span class="muted" style="font-size:0.6em;">/ {{ coins | length }}</span>
+    </div>
+  </div>
+  <div class="card" style="flex:1; min-width:180px;">
+    <div class="muted">Open lots</div>
+    <div style="font-size:1.6em; color:#f0f6fc;">{{ coins | sum(attribute='lots') }}</div>
+  </div>
+  <div class="card" style="flex:1; min-width:180px;">
+    <div class="muted">Realized P&L</div>
+    {% set total_pnl = coins | sum(attribute='realized') %}
+    <div style="font-size:1.6em;" class="{{ 'pos' if total_pnl >= 0 else 'neg' }}">${{ "%.2f"|format(total_pnl) }}</div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Coins</h2>
+  {% if coins %}
+  <table>
+    <thead><tr>
+      <th>Slug</th><th>Label</th><th>Status</th><th>Lots</th>
+      <th>Deployed</th><th>Realized P&L</th><th></th>
+    </tr></thead>
+    <tbody>
+    {% for c in coins %}
+    <tr>
+      <td><a href="/coin/{{ c.id }}">{{ c.slug }}</a></td>
+      <td>{{ c.label }}</td>
+      <td><span class="badge badge-{{ c.status }}">{{ c.status }}</span></td>
+      <td>{{ c.lots }}</td>
+      <td>${{ "%.2f"|format(c.deployed) }}</td>
+      <td class="{{ 'pos' if c.realized >= 0 else 'neg' }}">${{ "%.2f"|format(c.realized) }}</td>
+      <td><a href="/coin/{{ c.id }}">edit</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No coins yet. Add one below.</p>
+  {% endif %}
+</div>
+
+<div style="display:flex; gap:16px; flex-wrap:wrap;">
+
+  <div class="card" style="flex:1; min-width:300px;">
+    <h2>Add coin</h2>
+    <form action="/coin/add" method="post">
+      <table>
+        <tr><td class="muted">Slug</td><td><input type="text" name="slug" placeholder="simd" style="width:160px"></td></tr>
+        <tr><td class="muted">Label</td><td><input type="text" name="label" placeholder="SIMD" style="width:160px"></td></tr>
+        <tr><td class="muted">Mint</td><td><input type="text" name="mint" placeholder="SiMDt..." style="width:300px"></td></tr>
+        <tr><td></td><td style="padding-top:8px"><button type="submit" class="btn btn-green">Add (paper)</button></td></tr>
+      </table>
+    </form>
+  </div>
+
+  <div class="card" style="flex:1; min-width:240px;">
+    <h2>Deposit USDC</h2>
+    <form action="/deposit" method="post" style="display:flex; gap:8px; align-items:center;">
+      <input type="number" name="amount" step="0.01" min="0.01" placeholder="25.00" style="width:120px">
+      <button type="submit" class="btn btn-green">Deposit</button>
+    </form>
+    <p class="muted" style="margin-top:8px; font-size:0.8em;">Updates the ledger mirror. Actual USDC must already be in the wallet.</p>
+  </div>
+
+</div>
+{% endblock %}

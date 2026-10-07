@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Jupiter{% endblock %}</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; }
+body { font-family: monospace; background: #0d1117; color: #c9d1d9; margin: 0; padding: 0; }
+a { color: #58a6ff; text-decoration: none; }
+a:hover { text-decoration: underline; }
+nav { background: #161b22; border-bottom: 1px solid #30363d; padding: 8px 16px; display: flex; gap: 16px; align-items: center; }
+nav .brand { font-weight: bold; color: #f0f6fc; font-size: 1.1em; }
+.container { max-width: 1100px; margin: 0 auto; padding: 16px; }
+table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
+th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #21262d; }
+th { background: #161b22; color: #8b949e; font-weight: normal; }
+tr:hover td { background: #161b22; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.78em; }
+.badge-paper  { background: #1f3a5c; color: #58a6ff; }
+.badge-live   { background: #1a3d2b; color: #3fb950; }
+.badge-paused { background: #3d2b1a; color: #d29922; }
+.flash { padding: 8px 12px; margin-bottom: 12px; border-radius: 4px; font-size: 0.9em; }
+.flash-ok    { background: #1a3d2b; color: #3fb950; border: 1px solid #238636; }
+.flash-error { background: #3d1a1a; color: #f85149; border: 1px solid #6e1010; }
+form { display: inline; }
+input[type=text], input[type=number], select, textarea {
+  background: #0d1117; border: 1px solid #30363d; color: #c9d1d9;
+  padding: 4px 8px; border-radius: 4px; font-family: monospace; font-size: 0.9em; }
+button, .btn {
+  background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+  padding: 4px 12px; border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 0.9em; }
+button:hover, .btn:hover { background: #30363d; }
+.btn-green { background: #1a3d2b; border-color: #238636; color: #3fb950; }
+.btn-red   { background: #3d1a1a; border-color: #6e1010; color: #f85149; }
+.card { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 12px 16px; margin-bottom: 16px; }
+h2 { color: #f0f6fc; font-size: 1.1em; margin: 0 0 12px; }
+.muted { color: #8b949e; font-size: 0.85em; }
+.pos { color: #3fb950; }
+.neg { color: #f85149; }
+</style>
+</head>
+<body>
+<nav>
+  <span class="brand">Jupiter</span>
+  <a href="/">Dashboard</a>
+</nav>
+<div class="container">
+{% with messages = get_flashed_messages(with_categories=true) %}
+  {% for cat, msg in messages %}
+    <div class="flash flash-{{ cat }}">{{ msg }}</div>
+  {% endfor %}
+{% endwith %}
+{% block content %}{% endblock %}
+</div>
+</body>
+</html>
