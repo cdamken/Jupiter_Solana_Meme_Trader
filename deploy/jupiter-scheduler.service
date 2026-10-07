@@ -1,0 +1,21 @@
+[Unit]
+Description=Jupiter multi-coin scheduler
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=carlos
+WorkingDirectory=/home/carlos/jupiter
+ExecStart=/home/carlos/jupiter/venv/bin/python3 scheduler.py
+Restart=on-failure
+RestartSec=30
+EnvironmentFile=/home/carlos/jupiter/.env
+Environment=LIVE=0
+
+# Safety: never start in live mode automatically.
+# To enable live trading, set LIVE=1 in .env AND change the line above.
+# Systemd will not start with LIVE=1 here by default.
+
+[Install]
+WantedBy=multi-user.target

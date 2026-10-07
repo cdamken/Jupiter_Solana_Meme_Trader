@@ -1,0 +1,17 @@
+[Unit]
+Description=Jupiter panel (Flask UI)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=carlos
+WorkingDirectory=/home/carlos/jupiter
+ExecStart=/home/carlos/jupiter/venv/bin/python3 -m panel.app
+Restart=on-failure
+RestartSec=10
+EnvironmentFile=/home/carlos/jupiter/.env
+Environment=PANEL_PORT=5001
+
+[Install]
+WantedBy=multi-user.target
