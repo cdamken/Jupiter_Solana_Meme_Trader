@@ -74,7 +74,28 @@ def dashboard():
     coins = store.list_coins()
     summaries = [_coin_summary(store, dict(c)) for c in coins]
     balance = store.usdc_balance()
-    return render_template("dashboard.html", coins=summaries, balance=round(balance, 2))
+
+    # Fleet-wide recent trades (last 100, all coins)
+    fleet_trades = store._c.execute(
+        "SELECT t.ts, c.id AS coin_id, c.slug, c.label, t.mode, t.side,"
+        " t.price, t.tokens, t.usd, t.pnl_pct, t.txsig"
+        " FROM trades t JOIN coins c ON c.id = t.coin_id"
+        " ORDER BY t.ts DESC LIMIT 100"
+    ).fetchall()
+
+    # Total deposits (sum of all 'deposit' ledger entries)
+    dep_row = store._c.execute(
+        "SELECT COALESCE(SUM(delta), 0) AS total FROM usdc_ledger WHERE kind = 'deposit'"
+    ).fetchone()
+    total_deposited = round(dep_row["total"], 2) if dep_row else 0.0
+
+    return render_template(
+        "dashboard.html",
+        coins=summaries,
+        balance=round(balance, 2),
+        fleet_trades=[dict(r) for r in fleet_trades],
+        total_deposited=total_deposited,
+    )
 
 
 @app.get("/coin/<int:coin_id>")
@@ -178,6 +199,55 @@ def coin_config_delete(coin_id: int):
     store._c.commit()
     flash(f"Override '{key}' deleted", "ok")
     return redirect(url_for("coin_detail", coin_id=coin_id))
+
+
+@app.get("/money")
+def money():
+    store = _store()
+    rows = store._c.execute(
+        "SELECT id, ts, kind, delta, coin_id, txsig FROM usdc_ledger"
+        " WHERE kind IN ('deposit', 'withdraw')"
+        " ORDER BY ts DESC LIMIT 200"
+    ).fetchall()
+    balance = store.usdc_balance()
+    dep_row = store._c.execute(
+        "SELECT COALESCE(SUM(delta), 0) AS total FROM usdc_ledger WHERE kind = 'deposit'"
+    ).fetchone()
+    total_deposited = round(dep_row["total"], 2) if dep_row else 0.0
+    with_row = store._c.execute(
+        "SELECT COALESCE(SUM(ABS(delta)), 0) AS total FROM usdc_ledger WHERE kind = 'withdraw'"
+    ).fetchone()
+    total_withdrawn = round(with_row["total"], 2) if with_row else 0.0
+    return render_template(
+        "money.html",
+        ledger=[dict(r) for r in rows],
+        balance=round(balance, 2),
+        total_deposited=total_deposited,
+        total_withdrawn=total_withdrawn,
+    )
+
+
+@app.post("/withdraw")
+def withdraw():
+    try:
+        amount = float(request.form.get("amount", "0"))
+    except ValueError:
+        flash("Invalid amount", "error")
+        return redirect(url_for("money"))
+    if amount <= 0:
+        flash("Amount must be > 0", "error")
+        return redirect(url_for("money"))
+    store = _store()
+    if amount > store.usdc_balance():
+        flash("Insufficient balance", "error")
+        return redirect(url_for("money"))
+    with store._c:
+        store._c.execute(
+            "INSERT INTO usdc_ledger (kind, delta) VALUES ('withdraw', ?)",
+            (-amount,),
+        )
+    flash(f"Withdrawal of ${amount:.2f} USDC recorded", "ok")
+    return redirect(url_for("money"))
 
 
 @app.post("/deposit")

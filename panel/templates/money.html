@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Jupiter — Money{% endblock %}
+{% block content %}
+
+<div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:16px;">
+  <div class="card" style="flex:1; min-width:160px;">
+    <div class="muted">USDC Balance</div>
+    <div style="font-size:1.6em; color:#f0f6fc;">${{ balance }}</div>
+  </div>
+  <div class="card" style="flex:1; min-width:160px;">
+    <div class="muted">Total deposited</div>
+    <div style="font-size:1.6em; color:#f0f6fc;">${{ "%.2f"|format(total_deposited) }}</div>
+  </div>
+  <div class="card" style="flex:1; min-width:160px;">
+    <div class="muted">Total withdrawn</div>
+    <div style="font-size:1.6em; color:#f0f6fc;">${{ "%.2f"|format(total_withdrawn) }}</div>
+  </div>
+  <div class="card" style="flex:1; min-width:160px;">
+    <div class="muted">Net in wallet</div>
+    {% set net = total_deposited - total_withdrawn %}
+    <div style="font-size:1.6em;" class="{{ 'pos' if balance >= net else 'neg' }}">${{ "%.2f"|format(net) }}</div>
+  </div>
+</div>
+
+<div style="display:flex; gap:16px; flex-wrap:wrap;">
+
+  <div class="card" style="flex:1; min-width:240px;">
+    <h2>Deposit USDC</h2>
+    <form action="/deposit" method="post" style="display:flex; gap:8px; align-items:center;">
+      <input type="number" name="amount" step="0.01" min="0.01" placeholder="25.00" style="width:120px">
+      <button type="submit" class="btn btn-green">Deposit</button>
+    </form>
+    <p class="muted" style="margin-top:8px; font-size:0.8em;">Updates the ledger mirror. Actual USDC must already be in the wallet.</p>
+  </div>
+
+  <div class="card" style="flex:1; min-width:240px;">
+    <h2>Record withdrawal</h2>
+    <form action="/withdraw" method="post" style="display:flex; gap:8px; align-items:center;">
+      <input type="number" name="amount" step="0.01" min="0.01" placeholder="25.00" style="width:120px">
+      <button type="submit" class="btn btn-red">Withdraw</button>
+    </form>
+    <p class="muted" style="margin-top:8px; font-size:0.8em;">Records a manual USDC withdrawal from the ledger. Balance must cover it.</p>
+  </div>
+
+</div>
+
+<div class="card">
+  <h2>Deposit / withdrawal history</h2>
+  {% if ledger %}
+  <table>
+    <thead><tr><th>Time</th><th>Type</th><th>Amount</th><th>Tx</th></tr></thead>
+    <tbody>
+    {% for row in ledger %}
+    <tr>
+      <td class="muted" style="font-size:0.8em; white-space:nowrap;">{{ row.ts }}</td>
+      <td><span class="badge badge-{{ row.kind }}">{{ row.kind }}</span></td>
+      <td class="{{ 'pos' if row.delta > 0 else 'neg' }}">${{ "%.2f"|format(row.delta|abs) }}</td>
+      <td class="muted" style="font-size:0.75em; font-family:monospace;">
+        {% if row.txsig %}
+        <a href="https://solscan.io/tx/{{ row.txsig }}" target="_blank" rel="noopener"
+           title="{{ row.txsig }}">{{ row.txsig[:8] }}…</a>
+        {% else %}-{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No deposits or withdrawals recorded yet.</p>
+  {% endif %}
+</div>
+
+<p><a href="/">&larr; Dashboard</a></p>
+{% endblock %}

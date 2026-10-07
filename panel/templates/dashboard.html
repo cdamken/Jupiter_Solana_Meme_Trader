@@ -2,6 +2,14 @@
 {% block title %}Jupiter — Dashboard{% endblock %}
 {% block content %}
 
+{% set total_pnl = coins | sum(attribute='realized') %}
+{% set total_deployed = coins | sum(attribute='deployed') %}
+{% if total_deposited > 0 %}
+  {% set growth_pct = ((balance + total_deployed - total_deposited) / total_deposited * 100) %}
+{% else %}
+  {% set growth_pct = 0 %}
+{% endif %}
+
 <div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:16px;">
   <div class="card" style="flex:1; min-width:180px;">
     <div class="muted">USDC Balance</div>
@@ -20,8 +28,27 @@
   </div>
   <div class="card" style="flex:1; min-width:180px;">
     <div class="muted">Realized P&L</div>
-    {% set total_pnl = coins | sum(attribute='realized') %}
     <div style="font-size:1.6em;" class="{{ 'pos' if total_pnl >= 0 else 'neg' }}">${{ "%.2f"|format(total_pnl) }}</div>
+  </div>
+  <div class="card" style="flex:2; min-width:240px;">
+    <div class="muted">Growth</div>
+    <div style="display:flex; gap:24px; align-items:flex-end; flex-wrap:wrap;">
+      <div>
+        <div class="muted" style="font-size:0.75em;">Deposited</div>
+        <div style="font-size:1.3em; color:#f0f6fc;">${{ "%.2f"|format(total_deposited) }}</div>
+      </div>
+      <div style="color:#8b949e; font-size:1.2em;">→</div>
+      <div>
+        <div class="muted" style="font-size:0.75em;">Now (balance + deployed)</div>
+        <div style="font-size:1.3em; color:#f0f6fc;">${{ "%.2f"|format(balance + total_deployed) }}</div>
+      </div>
+      <div>
+        <div class="muted" style="font-size:0.75em;">Net</div>
+        <div style="font-size:1.4em; font-weight:bold;" class="{{ 'pos' if growth_pct >= 0 else 'neg' }}">
+          {{ "%+.1f%%"|format(growth_pct) }}
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -52,6 +79,93 @@
   {% endif %}
 </div>
 
+<!-- Fleet trades -->
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
+    <h2 style="margin:0;">Recent fleet trades</h2>
+    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+      <input type="text" id="ft-search" placeholder="search coin / txsig…"
+             style="width:180px; font-size:0.85em;"
+             oninput="filterTrades()">
+      <select id="ft-side" onchange="filterTrades()" style="font-size:0.85em;">
+        <option value="">all sides</option>
+        <option value="buy">buy</option>
+        <option value="sell">sell</option>
+      </select>
+      <button class="btn" style="font-size:0.8em; padding:3px 10px;"
+              onclick="exportFtCsv()">CSV</button>
+    </div>
+  </div>
+  {% if fleet_trades %}
+  <div style="overflow-x:auto;">
+  <table id="ft-table">
+    <thead><tr>
+      <th>Time</th><th>Coin</th><th>Mode</th><th>Side</th>
+      <th>Price</th><th>Tokens</th><th>USD</th><th>P&L</th><th>Tx</th>
+    </tr></thead>
+    <tbody id="ft-body">
+    {% for t in fleet_trades %}
+    <tr data-coin="{{ t.slug }}" data-side="{{ t.side }}" data-txsig="{{ t.txsig or '' }}">
+      <td class="muted" style="font-size:0.8em; white-space:nowrap;">{{ t.ts }}</td>
+      <td><a href="/coin/{{ t.coin_id }}">{{ t.label }}</a></td>
+      <td><span class="badge badge-{{ t.mode }}">{{ t.mode }}</span></td>
+      <td class="{{ 'pos' if t.side == 'sell' else '' }}">{{ t.side }}</td>
+      <td>${{ "%.6f"|format(t.price) if t.price else '-' }}</td>
+      <td>{{ "%.4f"|format(t.tokens) if t.tokens else '-' }}</td>
+      <td>${{ "%.2f"|format(t.usd) if t.usd else '-' }}</td>
+      <td class="{{ 'pos' if t.pnl_pct and t.pnl_pct > 0 else 'neg' if t.pnl_pct and t.pnl_pct < 0 else '' }}">
+        {{ "%.1f%%"|format(t.pnl_pct) if t.pnl_pct is not none else '-' }}
+      </td>
+      <td class="muted" style="font-size:0.75em; font-family:monospace;">
+        {% if t.txsig %}
+        <a href="https://solscan.io/tx/{{ t.txsig }}" target="_blank" rel="noopener"
+           title="{{ t.txsig }}">{{ t.txsig[:8] }}…</a>
+        {% else %}-{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <p class="muted" style="font-size:0.8em; margin-top:6px;">Last 100 trades across all coins.</p>
+  {% else %}
+  <p class="muted">No trades yet.</p>
+  {% endif %}
+</div>
+
+<script>
+function filterTrades() {
+  var q = document.getElementById('ft-search').value.toLowerCase();
+  var side = document.getElementById('ft-side').value;
+  var rows = document.querySelectorAll('#ft-body tr');
+  rows.forEach(function(r) {
+    var coin = (r.dataset.coin || '').toLowerCase();
+    var s = r.dataset.side || '';
+    var tx = (r.dataset.txsig || '').toLowerCase();
+    var matchQ = !q || coin.includes(q) || tx.includes(q);
+    var matchSide = !side || s === side;
+    r.style.display = (matchQ && matchSide) ? '' : 'none';
+  });
+}
+
+function exportFtCsv() {
+  var rows = document.querySelectorAll('#ft-table tr');
+  var lines = [];
+  rows.forEach(function(r) {
+    if (r.style.display === 'none') return;
+    var cells = r.querySelectorAll('th, td');
+    var cols = [];
+    cells.forEach(function(c) { cols.push('"' + c.innerText.replace(/"/g, '""') + '"'); });
+    lines.push(cols.join(','));
+  });
+  var blob = new Blob([lines.join('\n')], {type:'text/csv'});
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'jupiter_trades.csv';
+  a.click();
+}
+</script>
+
 <div style="display:flex; gap:16px; flex-wrap:wrap;">
 
   <div class="card" style="flex:1; min-width:300px;">
@@ -74,6 +188,7 @@
       <button type="submit" class="btn btn-green">Deposit</button>
     </form>
     <p class="muted" style="margin-top:8px; font-size:0.8em;">Updates the ledger mirror. Actual USDC must already be in the wallet.</p>
+    <p class="muted" style="margin-top:4px; font-size:0.8em;"><a href="/money">View deposit/withdrawal history →</a></p>
   </div>
 
 </div>
