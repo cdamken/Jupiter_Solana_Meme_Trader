@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}Jupiter — Overview{% endblock %}
+{% block content %}
+
+{% set live_coins   = coins | selectattr("status", "eq", "live")   | list %}
+{% set paused_coins = coins | selectattr("status", "eq", "paused") | list %}
+{% set paper_coins  = coins | selectattr("status", "eq", "paper")  | list %}
+{% set total_pnl    = coins | sum(attribute='realized') %}
+{% set total_deployed = coins | sum(attribute='deployed') %}
+{% if total_deposited > 0 %}
+  {% set growth_pct = ((balance + total_deployed - total_deposited) / total_deposited * 100) %}
+{% else %}
+  {% set growth_pct = 0 %}
+{% endif %}
+
+<!-- Fleet health strip -->
+<div style="display:flex; gap:12px; flex-wrap:wrap; margin-bottom:16px;">
+  <div class="card" style="flex:1; min-width:130px;">
+    <div class="muted">Live</div>
+    <div style="font-size:1.8em; color:#3fb950;">{{ live_coins | length }}</div>
+  </div>
+  <div class="card" style="flex:1; min-width:130px;">
+    <div class="muted">Paused</div>
+    <div style="font-size:1.8em; color:#d29922;">{{ paused_coins | length }}</div>
+  </div>
+  <div class="card" style="flex:1; min-width:130px;">
+    <div class="muted">Paper</div>
+    <div style="font-size:1.8em; color:#58a6ff;">{{ paper_coins | length }}</div>
+  </div>
+  <div class="card" style="flex:1; min-width:130px;">
+    <div class="muted">Open lots</div>
+    <div style="font-size:1.8em; color:#f0f6fc;">{{ coins | sum(attribute='lots') }}</div>
+  </div>
+  <div class="card" style="flex:1; min-width:150px;">
+    <div class="muted">Realized P&L</div>
+    <div style="font-size:1.8em;" class="{{ 'pos' if total_pnl >= 0 else 'neg' }}">${{ "%.2f"|format(total_pnl) }}</div>
+  </div>
+  <div class="card" style="flex:2; min-width:200px;">
+    <div class="muted">Growth (deposited → now)</div>
+    <div style="display:flex; gap:16px; align-items:flex-end; flex-wrap:wrap; margin-top:4px;">
+      <div><span class="muted" style="font-size:0.8em;">in</span> ${{ "%.2f"|format(total_deposited) }}</div>
+      <div><span class="muted" style="font-size:0.8em;">now</span> ${{ "%.2f"|format(balance + total_deployed) }}</div>
+      <div style="font-size:1.4em; font-weight:bold;" class="{{ 'pos' if growth_pct >= 0 else 'neg' }}">
+        {{ "%+.1f%%"|format(growth_pct) }}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Last activity -->
+<div class="card" style="margin-bottom:16px;">
+  <div style="display:flex; gap:24px; flex-wrap:wrap; align-items:center;">
+    <div>
+      <span class="muted">Last trade: </span>
+      {% if last_trade_ts %}
+        <span id="last-trade-age"></span>
+        <span class="muted" style="font-size:0.8em;">({{ last_trade_ts }})</span>
+      {% else %}
+        <span class="muted">no trades yet</span>
+      {% endif %}
+    </div>
+    <div>
+      <span class="muted">Panel: </span>
+      <span class="pos">running</span>
+    </div>
+    <div class="muted" style="font-size:0.8em;">
+      Scheduler process status is not tracked here — use
+      <code>./trader.sh status</code> or
+      <a href="/health">/health</a> endpoint.
+    </div>
+  </div>
+</div>
+
+{% if last_trade_ts %}
+<script>
+(function(){
+  var ts = {{ last_trade_ts }};
+  function fmt(s) {
+    if (s < 60)  return s + 's ago';
+    if (s < 3600) return Math.floor(s/60) + 'm ago';
+    if (s < 86400) return Math.floor(s/3600) + 'h ago';
+    return Math.floor(s/86400) + 'd ago';
+  }
+  function tick() {
+    var el = document.getElementById('last-trade-age');
+    if (el) el.textContent = fmt(Math.floor(Date.now()/1000 - ts));
+  }
+  tick(); setInterval(tick, 10000);
+})();
+</script>
+{% endif %}
+
+<!-- Per-coin status table -->
+<div class="card">
+  <h2>Coins</h2>
+  {% if coins %}
+  <table>
+    <thead><tr>
+      <th>Slug</th><th>Status</th><th>Lots</th><th>Oldest lot</th>
+      <th>Deployed</th><th>Realized P&L</th>
+    </tr></thead>
+    <tbody>
+    {% for c in coins %}
+    <tr>
+      <td><a href="/coin/{{ c.id }}">{{ c.label }}</a></td>
+      <td><span class="badge badge-{{ c.status }}">{{ c.status }}</span></td>
+      <td>{{ c.lots }}</td>
+      <td class="muted" style="font-size:0.85em;">
+        {% if lots_age.get(c.id) %}
+          {% set d = lots_age[c.id] %}
+          {% if d >= 7 %}
+            <span style="color:#f85149;">{{ d }}d</span>
+          {% elif d >= 3 %}
+            <span style="color:#d29922;">{{ d }}d</span>
+          {% else %}
+            {{ d }}d
+          {% endif %}
+        {% else %}-{% endif %}
+      </td>
+      <td>${{ "%.2f"|format(c.deployed) }}</td>
+      <td class="{{ 'pos' if c.realized >= 0 else 'neg' }}">${{ "%.2f"|format(c.realized) }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted">No coins yet.</p>
+  {% endif %}
+</div>
+
+<!-- Recent ledger activity -->
+<div class="card">
+  <h2>Recent ledger activity (last 30 entries)</h2>
+  <div style="overflow-x:auto;">
+  <table>
+    <thead><tr><th>Time</th><th>Coin</th><th>Kind</th><th>Delta</th></tr></thead>
+    <tbody>
+    {% for r in recent_ledger %}
+    <tr>
+      <td class="muted" style="font-size:0.8em; white-space:nowrap;">{{ r.ts }}</td>
+      <td>{{ r.slug or '-' }}</td>
+      <td><span style="font-family:monospace; font-size:0.85em;">{{ r.kind }}</span></td>
+      <td class="{{ 'pos' if r.delta > 0 else 'neg' if r.delta < 0 else '' }}"
+          style="font-family:monospace;">${{ "%.2f"|format(r.delta) }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+{% endblock %}

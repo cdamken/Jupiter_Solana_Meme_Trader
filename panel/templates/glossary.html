@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Jupiter — Glossary{% endblock %}
+{% block content %}
+
+<div class="card" style="margin-bottom:16px;">
+  <p class="muted" style="margin:0; font-size:0.9em;">
+    All configurable parameters. Fleet-only parameters are set in fleet defaults and apply to all coins;
+    coin-allowed parameters can be overridden per coin. Hover the row for the full description.
+    Locked-visible parameters are shown but cannot be changed through the panel.
+  </p>
+</div>
+
+{% set scopes = ['fleet-only', 'coin-allowed', 'coin-only'] %}
+{% for scope in scopes %}
+  {% set group = catalog | selectattr("scope", "eq", scope) | list %}
+  {% if group %}
+  <div class="card">
+    <h2>{{ scope }}</h2>
+    <table>
+      <thead><tr>
+        <th>Key</th><th>Label</th><th>Type</th>
+        <th>Default</th><th>Recommended</th><th>Range</th><th>Description</th>
+      </tr></thead>
+      <tbody>
+      {% for p in group %}
+      <tr style="{% if p.tier == 'locked-visible' %}opacity:0.55;{% elif p.tier == 'experimental' %}opacity:0.7;{% endif %}"
+          title="{{ p.help }}">
+        <td style="font-family:monospace; font-size:0.85em; white-space:nowrap;">
+          {{ p.key }}
+          {% if p.tier == 'locked-visible' %}
+            <span class="muted" style="font-size:0.75em;">[locked]</span>
+          {% elif p.tier == 'experimental' %}
+            <span style="color:#d29922; font-size:0.75em;">[exp]</span>
+          {% endif %}
+        </td>
+        <td>{{ p.label }}</td>
+        <td class="muted" style="font-size:0.8em;">{{ p.type }}</td>
+        <td style="font-family:monospace; font-size:0.85em;">{{ p.default_val or '-' }}</td>
+        <td style="font-family:monospace; font-size:0.85em; color:#58a6ff;">{{ p.recommended or '-' }}</td>
+        <td class="muted" style="font-size:0.8em; white-space:nowrap;">
+          {% if p.min is not none and p.max is not none %}{{ p.min }} – {{ p.max }}{% else %}-{% endif %}
+        </td>
+        <td class="muted" style="font-size:0.85em; max-width:320px;">{{ p.help }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+{% endfor %}
+
+{% if not catalog %}
+<div class="card">
+  <p class="muted">No parameters in catalog yet. Run bootstrap.py to seed the fleet defaults.</p>
+</div>
+{% endif %}
+
+{% endblock %}

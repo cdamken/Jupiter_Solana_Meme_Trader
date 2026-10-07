@@ -201,6 +201,67 @@ def coin_config_delete(coin_id: int):
     return redirect(url_for("coin_detail", coin_id=coin_id))
 
 
+@app.get("/overview")
+def overview():
+    store = _store()
+    coins = store.list_coins()
+    summaries = [_coin_summary(store, dict(c)) for c in coins]
+
+    # Scheduler heartbeat: check if a scheduler process wrote a recent heartbeat.
+    # We probe /health on ourselves (same process = panel-only) or look for a sentinel file.
+    # Simple heuristic: last trade timestamp across all coins.
+    last_trade = store._c.execute(
+        "SELECT MAX(ts) AS ts FROM trades"
+    ).fetchone()
+    last_trade_ts = last_trade["ts"] if last_trade and last_trade["ts"] else None
+
+    # Ledger summary: recent non-trade entries (reserve/release orphans, deposits)
+    recent_ledger = store._c.execute(
+        "SELECT l.ts, l.kind, l.delta, c.slug"
+        " FROM usdc_ledger l LEFT JOIN coins c ON c.id = l.coin_id"
+        " ORDER BY l.id DESC LIMIT 30"
+    ).fetchall()
+
+    # Lots age: days since oldest open lot per coin
+    lots_age = {}
+    now_ts = time.time()
+    for s in summaries:
+        if s["lots"] > 0:
+            oldest = store._c.execute(
+                "SELECT MIN(ts) AS ts FROM lots WHERE coin_id = ?", (s["id"],)
+            ).fetchone()
+            if oldest and oldest["ts"]:
+                days = (now_ts - oldest["ts"]) / 86400
+                lots_age[s["id"]] = round(days, 1)
+
+    balance = store.usdc_balance()
+    dep_row = store._c.execute(
+        "SELECT COALESCE(SUM(delta), 0) AS total FROM usdc_ledger WHERE kind = 'deposit'"
+    ).fetchone()
+    total_deposited = round(dep_row["total"], 2) if dep_row else 0.0
+
+    return render_template(
+        "overview.html",
+        coins=summaries,
+        balance=round(balance, 2),
+        total_deposited=total_deposited,
+        last_trade_ts=last_trade_ts,
+        recent_ledger=[dict(r) for r in recent_ledger],
+        lots_age=lots_age,
+        now_ts=now_ts,
+    )
+
+
+@app.get("/glossary")
+def glossary():
+    store = _store()
+    catalog = store._c.execute(
+        "SELECT key, tier, scope, type, label, help, default_val, recommended, min, max"
+        " FROM param_catalog ORDER BY scope, key"
+    ).fetchall()
+    return render_template("glossary.html", catalog=[dict(r) for r in catalog])
+
+
 @app.get("/money")
 def money():
     store = _store()
