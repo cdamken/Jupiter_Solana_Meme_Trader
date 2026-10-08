@@ -31,6 +31,22 @@ from store.store import Store
 PANEL_BASE = os.environ.get("PANEL_BASE", "")   # e.g. "/carlos/jupiter/" when behind PHP proxy
 
 app = Flask(__name__, template_folder="templates")
+
+# When behind a PHP proxy that strips the path prefix, tell Flask where it's mounted
+# so url_for() generates URLs the browser can follow (e.g. /carlos/jupiter/overview).
+if PANEL_BASE:
+    _script_name = PANEL_BASE.rstrip("/")
+
+    class _ScriptNameMiddleware:
+        def __init__(self, wsgi_app, script_name):
+            self.app = wsgi_app
+            self.script_name = script_name
+
+        def __call__(self, environ, start_response):
+            environ["SCRIPT_NAME"] = self.script_name
+            return self.app(environ, start_response)
+
+    app.wsgi_app = _ScriptNameMiddleware(app.wsgi_app, _script_name)
 app.secret_key = os.environ.get("PANEL_SECRET", "change-me-in-production")
 
 import datetime as _dt
