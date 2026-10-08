@@ -1,74 +1,85 @@
 {% extends "base.html" %}
 {% block title %}Jupiter — Money{% endblock %}
+{% block page_name %}Money{% endblock %}
+{% block page_sub %}deposits · withdrawals · ledger{% endblock %}
+
+{% block header_pills %}
+  <span class="hpill acc">${{ "%.2f"|format(balance) }} USDC</span>
+  <span class="hpill">deposited ${{ "%.2f"|format(total_deposited) }}</span>
+  <span class="hpill">withdrawn ${{ "%.2f"|format(total_withdrawn) }}</span>
+{% endblock %}
+
 {% block content %}
-
-<div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:16px;">
-  <div class="card" style="flex:1; min-width:160px;">
-    <div class="muted">USDC Balance</div>
-    <div style="font-size:1.6em; color:#f0f6fc;">${{ balance }}</div>
+<!-- KPI row -->
+<div class="stats" style="margin-bottom:20px; margin-top:4px;">
+  <div class="stat">
+    <div class="sl">USDC Balance</div>
+    <div class="sv">${{ "%.2f"|format(balance) }}</div>
   </div>
-  <div class="card" style="flex:1; min-width:160px;">
-    <div class="muted">Total deposited</div>
-    <div style="font-size:1.6em; color:#f0f6fc;">${{ "%.2f"|format(total_deposited) }}</div>
+  <div class="stat">
+    <div class="sl">Total deposited</div>
+    <div class="sv">${{ "%.2f"|format(total_deposited) }}</div>
   </div>
-  <div class="card" style="flex:1; min-width:160px;">
-    <div class="muted">Total withdrawn</div>
-    <div style="font-size:1.6em; color:#f0f6fc;">${{ "%.2f"|format(total_withdrawn) }}</div>
+  <div class="stat">
+    <div class="sl">Total withdrawn</div>
+    <div class="sv">${{ "%.2f"|format(total_withdrawn) }}</div>
   </div>
-  <div class="card" style="flex:1; min-width:160px;">
-    <div class="muted">Net in wallet</div>
-    {% set net = total_deposited - total_withdrawn %}
-    <div style="font-size:1.6em;" class="{{ 'pos' if balance >= net else 'neg' }}">${{ "%.2f"|format(net) }}</div>
+  <div class="stat">
+    <div class="sl">Net in wallet</div>
+    <div class="sv {{ 'pos' if (balance) >= 0 else 'neg' }}">${{ "%.2f"|format(balance) }}</div>
   </div>
 </div>
 
-<div style="display:flex; gap:16px; flex-wrap:wrap;">
-
-  <div class="card" style="flex:1; min-width:240px;">
-    <h2>Deposit USDC</h2>
-    <form action="{{ url_for('deposit') }}" method="post" style="display:flex; gap:8px; align-items:center;">
-      <input type="number" name="amount" step="0.01" min="0.01" placeholder="25.00" style="width:120px">
-      <button type="submit" class="btn btn-green">Deposit</button>
+<!-- Actions -->
+<div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:20px; margin-bottom:20px;">
+  <div class="card">
+    <div class="head"><h2>Deposit USDC</h2></div>
+    <form action="{{ url_for('deposit') }}" method="post" style="display:flex; gap:10px; align-items:center;">
+      <input type="number" name="amount" step="0.01" min="0.01" placeholder="25.00" style="width:110px">
+      <button type="submit" class="btn btn-primary">Deposit</button>
     </form>
-    <p class="muted" style="margin-top:8px; font-size:0.8em;">Updates the ledger mirror. Actual USDC must already be in the wallet.</p>
+    <p class="mut" style="margin-top:10px; font-size:13px;">Updates the ledger mirror. Actual USDC must already be in the wallet.</p>
   </div>
 
-  <div class="card" style="flex:1; min-width:240px;">
-    <h2>Record withdrawal</h2>
-    <form action="{{ url_for('withdraw') }}" method="post" style="display:flex; gap:8px; align-items:center;">
-      <input type="number" name="amount" step="0.01" min="0.01" placeholder="25.00" style="width:120px">
-      <button type="submit" class="btn btn-red">Withdraw</button>
+  <div class="card">
+    <div class="head"><h2>Record withdrawal</h2></div>
+    <form action="{{ url_for('withdraw') }}" method="post" style="display:flex; gap:10px; align-items:center;">
+      <input type="number" name="amount" step="0.01" min="0.01" placeholder="25.00" style="width:110px">
+      <button type="submit" class="btn btn-danger">Withdraw</button>
     </form>
-    <p class="muted" style="margin-top:8px; font-size:0.8em;">Records a manual USDC withdrawal from the ledger. Balance must cover it.</p>
+    <p class="mut" style="margin-top:10px; font-size:13px;">Records a manual USDC withdrawal from the ledger. Balance must cover it.</p>
   </div>
-
 </div>
 
+<!-- Ledger history -->
 <div class="card">
-  <h2>Deposit / withdrawal history</h2>
+  <div class="head"><h2>Deposit / withdrawal history</h2></div>
   {% if ledger %}
-  <table>
-    <thead><tr><th>Time</th><th>Type</th><th>Amount</th><th>Tx</th></tr></thead>
+  <div style="overflow-x:auto;">
+  <table class="led">
+    <thead><tr>
+      <th>Time</th><th>Kind</th>
+      <th style="text-align:right">Delta (USDC)</th>
+      <th>Tx</th>
+    </tr></thead>
     <tbody>
-    {% for row in ledger %}
+    {% for r in ledger %}
     <tr>
-      <td class="muted" style="font-size:0.8em; white-space:nowrap;">{{ row.ts }}</td>
-      <td><span class="badge badge-{{ row.kind }}">{{ row.kind }}</span></td>
-      <td class="{{ 'pos' if row.delta > 0 else 'neg' }}">${{ "%.2f"|format(row.delta|abs) }}</td>
-      <td class="muted" style="font-size:0.75em; font-family:monospace;">
-        {% if row.txsig %}
-        <a href="https://solscan.io/tx/{{ row.txsig }}" target="_blank" rel="noopener"
-           title="{{ row.txsig }}">{{ row.txsig[:8] }}…</a>
-        {% else %}-{% endif %}
+      <td class="mut" style="font-size:12px; white-space:nowrap;">{{ r.ts }}</td>
+      <td><span class="badge {{ 'badge-live' if r.kind == 'deposit' else 'badge-paused' }}">{{ r.kind }}</span></td>
+      <td style="text-align:right" class="{{ 'pos' if r.delta > 0 else 'neg' }}">${{ "%+.2f"|format(r.delta) }}</td>
+      <td class="mut" style="font-size:12px; font-family:monospace;">
+        {% if r.txsig %}<a href="https://solscan.io/tx/{{ r.txsig }}" target="_blank" rel="noopener">{{ r.txsig[:10] }}…</a>{% else %}-{% endif %}
       </td>
     </tr>
     {% endfor %}
     </tbody>
   </table>
+  </div>
   {% else %}
-  <p class="muted">No deposits or withdrawals recorded yet.</p>
+  <p class="mut">No deposits or withdrawals recorded yet.</p>
   {% endif %}
 </div>
 
-<p><a href="{{ url_for('dashboard') }}">&larr; Dashboard</a></p>
+<p><a href="{{ url_for('dashboard') }}">← Dashboard</a></p>
 {% endblock %}

@@ -1,184 +1,126 @@
 {% extends "base.html" %}
 {% block title %}Jupiter — Overview{% endblock %}
-{% block content %}
+{% block page_name %}Overview{% endblock %}
+{% block page_sub %}fleet health · all coins{% endblock %}
 
-{% set live_coins     = coins | selectattr("status", "eq", "live")   | list %}
-{% set paused_coins   = coins | selectattr("status", "eq", "paused") | list %}
-{% set paper_coins    = coins | selectattr("status", "eq", "paper")  | list %}
-{% set total_pnl      = coins | sum(attribute='realized') %}
-{% set total_deployed = coins | sum(attribute='deployed') %}
-{% if total_deposited > 0 %}
-  {% set growth_pct = ((balance + total_deployed - total_deposited) / total_deposited * 100) %}
-{% else %}
-  {% set growth_pct = 0 %}
+{% block header_pills %}
+  <span class="hpill acc">${{ "%.2f"|format(balance) }} USDC</span>
+  {% if last_trade_ts %}
+    <span class="hpill">last trade {{ ((now_ts - last_trade_ts) / 60) | int }} min ago</span>
+  {% else %}
+    <span class="hpill">no trades yet</span>
+  {% endif %}
+{% endblock %}
+
+{% block coin_nav %}
+{% if coins %}
+<div class="coins-nav">
+  <span class="coinlbl">coins</span>
+  {% for c in coins %}
+  <a href="{{ url_for('coin_detail', coin_id=c.id) }}">{{ c.slug }}</a>
+  {% endfor %}
+</div>
 {% endif %}
+{% endblock %}
 
-<!-- Realized profit grid (SIMD-style: coin cards + TOTAL) -->
+{% block content %}
+<!-- Realized profit per coin -->
 <div class="card">
-  <h2>Realized profit</h2>
-  <div style="display:flex; gap:12px; flex-wrap:wrap;">
+  <div class="head">
+    <h2>Realized profit</h2>
+    <button class="fresh" onclick="location.reload()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 4v5h-5"/></svg>
+      Refresh
+    </button>
+  </div>
+  <div class="stats">
     {% for c in coins %}
-    <div style="flex:1; min-width:130px; background:#0d1117; border:1px solid #21262d;
-                border-radius:6px; padding:10px 14px;">
-      <div style="font-size:1.05em; color:#f0f6fc; font-weight:bold; margin-bottom:2px;">
-        <a href="{{ url_for('coin_detail', coin_id=c.id) }}" style="color:#f0f6fc;">{{ c.label }}</a>
-      </div>
-      <div class="muted" style="font-size:0.8em; margin-bottom:6px;">
-        {{ sparklines.get(c.id, []) | selectattr("side", "eq", "buy")  | list | length }} buys
-        &nbsp;·&nbsp;
-        {{ sparklines.get(c.id, []) | selectattr("side", "eq", "sell") | list | length }} sells
-      </div>
-      <div style="font-size:1.4em; font-weight:bold;"
-           class="{{ 'pos' if c.realized >= 0 else 'neg' }}">${{ "%.2f"|format(c.realized) }}</div>
-      <span class="badge badge-{{ c.status }}" style="margin-top:6px; display:inline-block;">{{ c.status }}</span>
+    <div class="stat">
+      <div class="sl"><a href="{{ url_for('coin_detail', coin_id=c.id) }}" style="text-decoration:none; color:inherit;">{{ c.slug }}</a></div>
+      <div class="sv {{ 'pos' if c.realized >= 0 else 'neg' }}">${{ "%.2f"|format(c.realized) }}</div>
+      <div class="mut" style="font-size:12px; margin-top:2px;">{{ c.lots }} lots · ${{ "%.2f"|format(c.deployed) }} out</div>
     </div>
     {% endfor %}
-    <!-- TOTAL -->
-    <div style="flex:1; min-width:130px; background:#0d1117; border:1px solid #30363d;
-                border-radius:6px; padding:10px 14px;">
-      <div style="font-size:1.05em; color:#8b949e; font-weight:bold; margin-bottom:2px;">TOTAL</div>
-      <div class="muted" style="font-size:0.8em; margin-bottom:6px;">all coins</div>
-      <div style="font-size:1.4em; font-weight:bold;"
-           class="{{ 'pos' if total_pnl >= 0 else 'neg' }}">${{ "%.2f"|format(total_pnl) }}</div>
+    <div class="stat" style="border:1px solid var(--primary); background:var(--primary); color:#fff;">
+      <div class="sl" style="color:rgba(255,255,255,.6)">TOTAL</div>
+      <div class="sv" style="color:#fff;">${{ "%.2f"|format(coins | sum(attribute='realized')) }}</div>
+      <div style="font-size:12px; color:rgba(255,255,255,.55); margin-top:2px;">all coins</div>
     </div>
   </div>
 </div>
 
-<!-- Growth card -->
+<!-- Growth -->
 <div class="card">
   <h2>Growth (deposited vs fleet value now)</h2>
-  <div style="display:flex; gap:24px; flex-wrap:wrap; align-items:flex-end;">
+  {% set total_deployed = coins | sum(attribute='deployed') %}
+  {% if total_deposited > 0 %}
+    {% set growth_pct = ((balance + total_deployed - total_deposited) / total_deposited * 100) %}
+  {% else %}
+    {% set growth_pct = 0 %}
+  {% endif %}
+  <div class="big">
     <div>
-      <div class="muted" style="font-size:0.8em;">deposited</div>
-      <div style="font-size:1.4em; color:#f0f6fc;">${{ "%.2f"|format(total_deposited) }}</div>
+      <div class="bl">deposited</div>
+      <div class="bv">${{ "%.2f"|format(total_deposited) }}</div>
     </div>
-    <div style="color:#8b949e; font-size:1.4em;">→</div>
     <div>
-      <div class="muted" style="font-size:0.8em;">fleet value now (balance + deployed)</div>
-      <div style="font-size:1.4em; color:#f0f6fc;">${{ "%.2f"|format(balance + total_deployed) }}</div>
+      <div class="bl">fleet value now (balance + deployed)</div>
+      <div class="bv">${{ "%.2f"|format(balance + total_deployed) }}</div>
     </div>
     <div>
-      <div class="muted" style="font-size:0.8em;">growth</div>
-      <div style="font-size:1.6em; font-weight:bold;"
-           class="{{ 'pos' if growth_pct >= 0 else 'neg' }}">
-        ${{ "%.2f"|format(balance + total_deployed - total_deposited) }}
-        ({{ "%+.1f%%"|format(growth_pct) }})
-      </div>
+      <div class="bl">growth</div>
+      <div class="bv {{ 'pos' if growth_pct >= 0 else 'neg' }}">{{ "%+.1f%%"|format(growth_pct) }}</div>
     </div>
   </div>
-  <div class="muted" style="margin-top:8px; font-size:0.8em;">
+  <p class="mut" style="font-size:13px; margin-top:14px;">
     Fleet value = USDC balance (${{ "%.2f"|format(balance) }}) + deployed capital (${{ "%.2f"|format(total_deployed) }}).
-    Last trade:
-    {% if last_trade_ts %}
-      <span id="last-trade-age"></span> ({{ last_trade_ts }})
-    {% else %}no trades yet{% endif %}
+    Last trade: {{ "no trades yet" if not last_trade_ts else (((now_ts - last_trade_ts) / 60) | int)|string + " min ago" }}.
     &nbsp;·&nbsp; Panel: <span class="pos">running</span>
     &nbsp;·&nbsp; Scheduler: <a href="{{ url_for('health') }}">/health</a>
-  </div>
+  </p>
 </div>
 
-{% if last_trade_ts %}
-<script>
-(function(){
-  var ts = {{ last_trade_ts }};
-  function fmt(s) {
-    if (s < 60)    return s + 's ago';
-    if (s < 3600)  return Math.floor(s/60) + 'm ago';
-    if (s < 86400) return Math.floor(s/3600) + 'h ago';
-    return Math.floor(s/86400) + 'd ago';
-  }
-  function tick() { var e=document.getElementById('last-trade-age'); if(e) e.textContent=fmt(Math.floor(Date.now()/1000-ts)); }
-  tick(); setInterval(tick, 10000);
-})();
-</script>
-{% endif %}
-
-<!-- Per-coin price chart: one full-width card per coin (SIMD style) -->
-{% for c in coins %}
-{% set spark = sparklines.get(c.id, []) %}
-{% if spark and spark | length > 1 %}
+<!-- Lots age -->
+{% if lots_age %}
 <div class="card">
-  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
-    <h2 style="margin:0;">Price with buys &amp; sells — <a href="{{ url_for('coin_detail', coin_id=c.id) }}">{{ c.label }}</a></h2>
-    <span class="muted" style="font-size:0.8em;">{{ spark | length }} trades shown</span>
-  </div>
-
-  {# Build SVG chart inline with Jinja2 -- time on X axis, price on Y #}
-  {% set prices = spark | map(attribute='price') | list %}
-  {% set times  = spark | map(attribute='ts')    | list %}
-  {% set pmin_raw = prices | min %}
-  {% set pmax_raw = prices | max %}
-  {% set prange_raw = pmax_raw - pmin_raw if pmax_raw > pmin_raw else pmax_raw * 0.01 if pmax_raw > 0 else 1e-9 %}
-  {# add 6% padding top/bottom like SIMD #}
-  {% set pmin = pmin_raw - prange_raw * 0.06 %}
-  {% set pmax = pmax_raw + prange_raw * 0.06 %}
-  {% set prange = pmax - pmin %}
-  {% set tmin = times | min %}
-  {% set tmax = times | max %}
-  {% set tspan = tmax - tmin if tmax > tmin else 1 %}
-  {% set W = 900 %}
-  {% set H = 120 %}
-  {% set padL = 8 %}{% set padR = 8 %}{% set padT = 14 %}{% set padB = 24 %}
-
-  <svg viewBox="0 0 {{ W }} {{ H }}" width="100%" style="max-width:100%;height:auto;display:block;"
-       xmlns="http://www.w3.org/2000/svg" font-family="monospace">
-    {# Price line #}
-    <polyline
-      fill="none" stroke="#58a6ff" stroke-width="1.6"
-      points="{% for pt in spark %}{{ (padL + (pt.ts - tmin) / tspan * (W - padL - padR)) | round(1) }},{{ (padT + (1 - (pt.price - pmin) / prange) * (H - padT - padB)) | round(1) }} {% endfor %}"
-    />
-    {# Buy/sell dots #}
-    {% for pt in spark %}
-    {% set cx = (padL + (pt.ts - tmin) / tspan * (W - padL - padR)) | round(1) %}
-    {% set cy = (padT + (1 - (pt.price - pmin) / prange) * (H - padT - padB)) | round(1) %}
-    <circle cx="{{ cx }}" cy="{{ cy }}" r="4.5"
-      fill="{{ '#3fb950' if pt.side == 'buy' else '#d29922' }}"
-      stroke="#0d1117" stroke-width="1.2">
-      <title>{{ pt.side }} ${{ "%.7f"|format(pt.price) }}</title>
-    </circle>
-    {% endfor %}
-    {# Price labels Y axis #}
-    <text x="{{ padL }}" y="10"            font-size="10" fill="#8b949e">${{ "%.7f"|format(pmax_raw) }}</text>
-    <text x="{{ padL }}" y="{{ H - padB + 8 }}" font-size="10" fill="#8b949e">${{ "%.7f"|format(pmin_raw) }}</text>
-    {# Date labels X axis - first and last #}
-    <text x="{{ padL }}" y="{{ H - 4 }}" font-size="10" fill="#8b949e">{{ spark[0].ts | int | datefmt }}</text>
-    <text x="{{ W - padR }}" y="{{ H - 4 }}" font-size="10" fill="#8b949e" text-anchor="end">{{ spark[-1].ts | int | datefmt }}</text>
-  </svg>
-
-  <div style="font-size:0.8em; color:#8b949e; margin-top:4px;">
-    <span style="color:#3fb950;">&#9679;</span> buy &nbsp;&nbsp;
-    <span style="color:#d29922;">&#9679;</span> sell &nbsp;·&nbsp;
-    hover a dot for side &amp; price
-    {% if lots_age.get(c.id) %}
-    &nbsp;·&nbsp; oldest open lot:
-    {% set d = lots_age[c.id] %}
-    <span style="color:{% if d >= 7 %}#f85149{% elif d >= 3 %}#d29922{% else %}#8b949e{% endif %};">{{ d }}d</span>
+  <h2>Oldest open lot per coin</h2>
+  <div class="stats">
+    {% for c in coins %}
+    {% if c.id in lots_age %}
+    <div class="stat">
+      <div class="sl">{{ c.slug }}</div>
+      <div class="sv">{{ lots_age[c.id] }}d</div>
+      <div class="mut" style="font-size:12px; margin-top:2px;">oldest lot</div>
+    </div>
     {% endif %}
-    &nbsp;·&nbsp; {{ c.lots }} open lot(s) · deployed ${{ "%.2f"|format(c.deployed) }}
+    {% endfor %}
   </div>
 </div>
 {% endif %}
-{% endfor %}
 
 <!-- Recent ledger activity -->
 <div class="card">
   <h2>Recent ledger activity (last 30 entries)</h2>
+  {% if recent_ledger %}
   <div style="overflow-x:auto;">
-  <table>
-    <thead><tr><th>Time</th><th>Coin</th><th>Kind</th><th>Delta</th></tr></thead>
+  <table class="led">
+    <thead><tr><th>Time</th><th>Coin</th><th>Kind</th><th style="text-align:right">Delta</th></tr></thead>
     <tbody>
     {% for r in recent_ledger %}
     <tr>
-      <td class="muted" style="font-size:0.8em; white-space:nowrap;">{{ r.ts }}</td>
+      <td class="mut" style="font-size:12px; white-space:nowrap;">{{ r.ts }}</td>
       <td>{{ r.slug or '-' }}</td>
-      <td style="font-family:monospace; font-size:0.85em;">{{ r.kind }}</td>
-      <td class="{{ 'pos' if r.delta > 0 else 'neg' if r.delta < 0 else '' }}"
-          style="font-family:monospace;">${{ "%.2f"|format(r.delta) }}</td>
+      <td><code style="font-size:12px;">{{ r.kind }}</code></td>
+      <td style="text-align:right" class="{{ 'pos' if r.delta and r.delta > 0 else 'neg' if r.delta and r.delta < 0 else '' }}">
+        {{ "%+.2f"|format(r.delta) if r.delta is not none else '-' }}
+      </td>
     </tr>
     {% endfor %}
     </tbody>
   </table>
   </div>
+  {% else %}
+  <p class="mut">No ledger entries yet.</p>
+  {% endif %}
 </div>
-
 {% endblock %}

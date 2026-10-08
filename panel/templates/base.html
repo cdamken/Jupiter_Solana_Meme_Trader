@@ -1,55 +1,198 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-
+<meta name="color-scheme" content="light">
 <title>{% block title %}Jupiter{% endblock %}</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%23001d3b'/><path d='M8 16q8-10 16 0' fill='none' stroke='%23ffd630' stroke-width='2.6' stroke-linecap='round'/><circle cx='16' cy='16' r='4' fill='%23ffd630'/></svg>">
 <style>
-*, *::before, *::after { box-sizing: border-box; }
-body { font-family: monospace; background: #0d1117; color: #c9d1d9; margin: 0; padding: 0; }
-a { color: #58a6ff; text-decoration: none; }
-a:hover { text-decoration: underline; }
-nav { background: #161b22; border-bottom: 1px solid #30363d; padding: 8px 16px; display: flex; gap: 16px; align-items: center; }
-nav .brand { font-weight: bold; color: #f0f6fc; font-size: 1.1em; }
-.container { max-width: 1100px; margin: 0 auto; padding: 16px; }
-table { width: 100%; border-collapse: collapse; font-size: 0.9em; }
-th, td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #21262d; }
-th { background: #161b22; color: #8b949e; font-weight: normal; }
-tr:hover td { background: #161b22; }
-.badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.78em; }
-.badge-paper  { background: #1f3a5c; color: #58a6ff; }
-.badge-live   { background: #1a3d2b; color: #3fb950; }
-.badge-paused { background: #3d2b1a; color: #d29922; }
-.flash { padding: 8px 12px; margin-bottom: 12px; border-radius: 4px; font-size: 0.9em; }
-.flash-ok    { background: #1a3d2b; color: #3fb950; border: 1px solid #238636; }
-.flash-error { background: #3d1a1a; color: #f85149; border: 1px solid #6e1010; }
-form { display: inline; }
-input[type=text], input[type=number], select, textarea {
-  background: #0d1117; border: 1px solid #30363d; color: #c9d1d9;
-  padding: 4px 8px; border-radius: 4px; font-family: monospace; font-size: 0.9em; }
-button, .btn {
-  background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
-  padding: 4px 12px; border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 0.9em; }
-button:hover, .btn:hover { background: #30363d; }
-.btn-green { background: #1a3d2b; border-color: #238636; color: #3fb950; }
-.btn-red   { background: #3d1a1a; border-color: #6e1010; color: #f85149; }
-.card { background: #161b22; border: 1px solid #30363d; border-radius: 6px; padding: 12px 16px; margin-bottom: 16px; }
-h2 { color: #f0f6fc; font-size: 1.1em; margin: 0 0 12px; }
-.muted { color: #8b949e; font-size: 0.85em; }
-.pos { color: #3fb950; }
-.neg { color: #f85149; }
+@font-face{font-family:'Space Grotesk';src:url('{{ url_for("static", filename="space-grotesk-latin-ext.woff2") }}') format('woff2');font-weight:400 700;font-display:swap;unicode-range:U+0100-024F}
+@font-face{font-family:'Space Grotesk';src:url('{{ url_for("static", filename="space-grotesk-latin.woff2") }}') format('woff2');font-weight:400 700;font-display:swap}
+:root{--primary:#001d3b;--accent:#ffd630;--bg:#eef3f8;--white:#fff;--tab:#eef2f7;
+--text:#1f2a3a;--mut:#5a6b80;--noteb:#fef8e6;--note:#b7791f;--line:#d7dfe8;
+--ok:#1f8a4c;--warn:#c0392b;--ok-paper:#0891b2;--warn-paper:#7c3aed;
+--sans:'Space Grotesk',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+--mono:ui-monospace,'SF Mono',Menlo,monospace;
+--r:9px;--rl:12px;--pill:30px;
+--sh:0 1px 3px rgba(16,32,56,.12);--shm:0 4px 20px rgba(16,32,56,.07);
+--shl:0 24px 48px rgba(0,10,30,.28);--shn:0 6px 22px rgba(0,15,40,.16);
+--ease:cubic-bezier(.16,1,.3,1)}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);font:400 17px/1.45 var(--sans);
+-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;padding-bottom:56px}
+a{color:var(--primary)}a:hover{color:var(--note)}
+.wrap{max-width:920px;margin:0 auto;padding:28px 24px}
+
+/* ---- header ---- */
+header{position:sticky;top:0;z-index:20;
+background:linear-gradient(120deg,#00152b 0%,#001d3b 55%,#062a52 100%);
+color:#fff;box-shadow:var(--shn)}
+header>.wrap{padding:14px 24px;display:flex;align-items:center;justify-content:space-between;
+gap:14px 28px;flex-wrap:nowrap;height:68px}
+.brand{display:flex;align-items:center;gap:12px;min-width:0}
+.mark{display:grid;place-items:center;width:36px;height:36px;border-radius:10px;flex:0 0 auto;
+background:var(--accent);color:var(--primary);box-shadow:0 2px 10px rgba(255,214,48,.35)}
+.idwrap{min-width:0}
+.idrow{display:flex;align-items:baseline;gap:8px;flex-wrap:nowrap;overflow:hidden;min-width:0}
+.idfleet{font-weight:700;font-size:15px;letter-spacing:-.01em;line-height:1.2;flex:0 0 auto}
+.idpage{font-weight:600;font-size:13px;color:var(--accent);line-height:1.2;
+white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.bs{font-size:12px;color:rgba(255,255,255,.55);margin-top:1px}
+.hpills{display:flex;gap:7px;flex-wrap:wrap;align-items:center;justify-content:flex-end}
+.hpill{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:var(--pill);
+font-size:12px;font-weight:700;letter-spacing:.01em;
+background:rgba(255,255,255,.12);color:rgba(255,255,255,.82);white-space:nowrap}
+.hpill.acc{background:var(--accent);color:var(--primary)}
+.hpill.warn{background:var(--note);color:#fff}
+
+/* ---- section nav ---- */
+.hubnav{background:rgba(0,0,0,.18);border-top:1px solid rgba(255,255,255,.08)}
+.hubnav>.wrap{padding:6px 24px;display:flex;gap:16px;align-items:center;justify-content:space-between}
+.secs{display:flex;gap:14px;align-items:center;flex:0 0 auto}
+.secs a{color:rgba(255,255,255,.65);text-decoration:none;font-size:13px;font-weight:600;
+letter-spacing:.01em;padding:7px 2px;border-bottom:2px solid transparent;transition:color .12s}
+.secs a:hover{color:#fff}
+.secs a.now{color:#fff;border-bottom-color:var(--accent)}
+.coins-nav{display:flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;min-width:0}
+.coinlbl{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:rgba(255,255,255,.4);margin-right:2px}
+.coins-nav a{text-decoration:none;font-size:12px;font-weight:700;padding:3px 10px;border-radius:999px;
+background:rgba(255,255,255,.08);color:rgba(255,255,255,.7);transition:all .12s}
+.coins-nav a:hover{color:#fff;background:rgba(255,255,255,.16)}
+.coins-nav a.now{background:var(--accent);color:var(--primary)}
+
+/* ---- cards ---- */
+.card{background:var(--white);border:1px solid var(--line);border-radius:var(--rl);
+box-shadow:var(--shm);padding:22px 24px;margin-bottom:20px}
+.card>h2{margin:0 0 16px;font-size:12px;font-weight:700;text-transform:uppercase;
+letter-spacing:.07em;color:var(--mut);display:flex;align-items:center;gap:8px}
+.head{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin-bottom:18px}
+.head h2{margin:0}
+
+/* ---- big numbers ---- */
+.big{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:4px 32px;align-items:end}
+.bl{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);margin-bottom:4px}
+.bv{font-size:38px;font-weight:700;letter-spacing:-.025em;line-height:1.05;color:var(--primary);
+overflow-wrap:break-word;min-width:0}
+.bv.pos{color:var(--ok)}
+.bv.neg{color:var(--note)}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-top:18px}
+.stat{background:var(--tab);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;min-width:0}
+.sv{font-size:20px;font-weight:700;letter-spacing:-.02em;color:var(--primary);overflow-wrap:break-word}
+.sl{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin-top:2px}
+
+/* ---- tables ---- */
+.led{width:100%;border-collapse:collapse;font-size:13px}
+.led th{text-align:left;color:var(--mut);font-weight:600;padding:7px 8px;
+border-bottom:1px solid var(--line);white-space:nowrap}
+.led td{padding:7px 8px;border-bottom:1px solid var(--line)}
+.led tr:last-child td{border-bottom:0}
+td.buy{color:#1a6fb0;font-weight:700}
+td.sell{color:#1a8a5a;font-weight:700}
+
+/* ---- pills (on-page status) ---- */
+.pills{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:18px}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:4px 12px;border-radius:var(--pill);
+font-size:12px;font-weight:700;background:var(--white);color:var(--text);border:1px solid var(--line)}
+.pill.acc{background:var(--accent);color:var(--primary);border-color:transparent}
+.pill.warn{background:var(--note);color:#fff;border-color:transparent}
+.pill.ok{background:#e8f5ee;color:var(--ok);border-color:#b6d9b6}
+.pill.paper{background:#e8f0fb;color:#1a6fb0;border-color:#b3cbef}
+
+/* ---- badges ---- */
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700}
+.badge-paper{background:#e8f0fb;color:#1a6fb0}
+.badge-live{background:#e8f5ee;color:var(--ok)}
+.badge-paused{background:var(--noteb);color:var(--note)}
+
+/* ---- misc ---- */
+.pos{color:var(--ok)}
+.neg{color:var(--note)}
+.mut{color:var(--mut)}
+code,.k{font-family:var(--mono);font-size:13px}
+.note-box{display:flex;align-items:flex-start;gap:10px;background:var(--noteb);
+border:1px solid #eccf8f;border-radius:var(--r);padding:12px 14px;
+margin-bottom:16px;font-size:14px;color:var(--primary)}
+.msg{display:flex;align-items:flex-start;gap:10px;background:#eef7ee;border:1px solid #b6d9b6;
+border-radius:var(--r);padding:12px 14px;margin-bottom:18px;font-size:14.5px;color:#1f3a24}
+.msg.err{background:var(--noteb);border-color:#eccf8f;color:var(--primary)}
+
+/* ---- forms ---- */
+input[type=text],input[type=number],select,textarea{
+padding:7px 11px;font:600 15px var(--sans);color:var(--primary);
+background:var(--white);border:1px solid var(--line);border-radius:var(--r)}
+input[type=text]:focus,input[type=number]:focus,select:focus{
+outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
+.btn{padding:9px 18px;border:0;border-radius:var(--r);font:700 14px var(--sans);
+cursor:pointer;display:inline-flex;align-items:center;justify-content:center;gap:6px;transition:box-shadow .14s}
+.btn-primary{background:var(--primary);color:#fff}
+.btn-primary:hover{box-shadow:var(--sh)}
+.btn-accent{background:var(--accent);color:var(--primary)}
+.btn-accent:hover{box-shadow:0 2px 10px rgba(255,214,48,.4)}
+.btn-ghost{border:1px solid var(--line);background:var(--white);color:var(--primary)}
+.btn-ghost:hover{box-shadow:var(--sh)}
+.btn-danger{background:var(--note);color:#fff}
+.btn-sm{padding:5px 12px;font-size:12.5px}
+
+/* ---- flash ---- */
+.flash{padding:10px 14px;margin-bottom:14px;border-radius:var(--r);font-size:14px;border-width:1px;border-style:solid}
+.flash-ok{background:#eef7ee;color:var(--ok);border-color:#b6d9b6}
+.flash-error{background:var(--noteb);color:var(--note);border-color:#eccf8f}
+
+/* ---- fresh button ---- */
+.fresh{display:inline-flex;align-items:center;gap:7px;font:600 13px var(--sans);color:var(--mut);
+border:1px solid var(--line);background:var(--white);border-radius:var(--pill);
+padding:5px 12px;cursor:pointer;transition:box-shadow .14s}
+.fresh:hover{box-shadow:var(--sh);color:var(--primary)}
+
+@media(max-width:640px){
+  .hpills{display:none}
+  header>.wrap{height:56px}
+  .wrap{padding:16px}
+  .hubnav>.wrap{padding:5px 16px;flex-wrap:wrap;gap:6px}
+  .coins-nav{justify-content:flex-start}
+  .bv{font-size:28px}
+}
 </style>
 </head>
 <body>
-<nav>
-  <span class="brand">Jupiter</span>
-  <a href="{{ url_for('dashboard') }}">Dashboard</a>
-  <a href="{{ url_for('overview') }}">Overview</a>
-  <a href="{{ url_for('money') }}">Money</a>
-  <a href="{{ url_for('glossary') }}">Glossary</a>
-</nav>
-<div class="container">
+<header>
+  <div class="wrap">
+    <div class="brand">
+      <span class="mark">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="9"/>
+          <ellipse cx="12" cy="12" rx="9" ry="4" transform="rotate(-20 12 12)"/>
+          <circle cx="12" cy="12" r="2.5" fill="currentColor" stroke="none"/>
+        </svg>
+      </span>
+      <div class="idwrap">
+        <div class="idrow">
+          <span class="idfleet">Jupiter fleet</span>
+          <span class="idpage">{% block page_name %}{% endblock %}</span>
+        </div>
+        <div class="bs">{% block page_sub %}snoopy5 · multi-coin USDC bot{% endblock %}</div>
+      </div>
+    </div>
+    <div class="hpills">
+      {% block header_pills %}{% endblock %}
+    </div>
+  </div>
+  <nav class="hubnav">
+    <div class="wrap">
+      <div class="secs">
+        <a href="{{ url_for('dashboard') }}"{% if request.endpoint == 'dashboard' %} class="now"{% endif %}>Dashboard</a>
+        <a href="{{ url_for('overview') }}"{% if request.endpoint == 'overview' %} class="now"{% endif %}>Overview</a>
+        <a href="{{ url_for('money') }}"{% if request.endpoint == 'money' %} class="now"{% endif %}>Money</a>
+        <a href="{{ url_for('glossary') }}"{% if request.endpoint == 'glossary' %} class="now"{% endif %}>Glossary</a>
+      </div>
+      {% block coin_nav %}{% endblock %}
+    </div>
+  </nav>
+</header>
+
+<div class="wrap">
 {% with messages = get_flashed_messages(with_categories=true) %}
   {% for cat, msg in messages %}
     <div class="flash flash-{{ cat }}">{{ msg }}</div>
