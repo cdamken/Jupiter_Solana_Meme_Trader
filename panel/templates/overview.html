@@ -21,7 +21,7 @@
     <div style="flex:1; min-width:130px; background:#0d1117; border:1px solid #21262d;
                 border-radius:6px; padding:10px 14px;">
       <div style="font-size:1.05em; color:#f0f6fc; font-weight:bold; margin-bottom:2px;">
-        <a href="/coin/{{ c.id }}" style="color:#f0f6fc;">{{ c.label }}</a>
+        <a href="{{ url_for('coin_detail', coin_id=c.id) }}" style="color:#f0f6fc;">{{ c.label }}</a>
       </div>
       <div class="muted" style="font-size:0.8em; margin-bottom:6px;">
         {{ sparklines.get(c.id, []) | selectattr("side", "eq", "buy")  | list | length }} buys
@@ -73,7 +73,7 @@
       <span id="last-trade-age"></span> ({{ last_trade_ts }})
     {% else %}no trades yet{% endif %}
     &nbsp;·&nbsp; Panel: <span class="pos">running</span>
-    &nbsp;·&nbsp; Scheduler: <a href="/health">/health</a>
+    &nbsp;·&nbsp; Scheduler: <a href="{{ url_for('health') }}">/health</a>
   </div>
 </div>
 
@@ -99,7 +99,7 @@
 {% if spark and spark | length > 1 %}
 <div class="card">
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; flex-wrap:wrap; gap:8px;">
-    <h2 style="margin:0;">Price with buys &amp; sells — <a href="/coin/{{ c.id }}">{{ c.label }}</a></h2>
+    <h2 style="margin:0;">Price with buys &amp; sells — <a href="{{ url_for('coin_detail', coin_id=c.id) }}">{{ c.label }}</a></h2>
     <span class="muted" style="font-size:0.8em;">{{ spark | length }} trades shown</span>
   </div>
 

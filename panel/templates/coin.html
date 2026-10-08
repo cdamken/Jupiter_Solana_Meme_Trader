@@ -14,14 +14,14 @@
   <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
     {% if coin.status == 'live' %}
       <button class="btn btn-green" disabled>live (active)</button>
-      <form action="/coin/{{ coin.id }}/status" method="post"
+      <form action="{{ url_for('coin_status', coin_id=coin.id) }}" method="post"
             onsubmit="return confirmStatus('{{ coin.slug }}', 'live', 'paused')">
         <input type="hidden" name="status" value="paused">
         <button type="submit" class="btn btn-red">⚠ pause</button>
       </form>
     {% elif coin.status == 'paused' %}
       <button class="btn" disabled>paused</button>
-      <form action="/coin/{{ coin.id }}/status" method="post"
+      <form action="{{ url_for('coin_status', coin_id=coin.id) }}" method="post"
             onsubmit="return confirmStatus('{{ coin.slug }}', 'paused', 'live')">
         <input type="hidden" name="status" value="live">
         <button type="submit" class="btn btn-red">⚠ enable live</button>
@@ -29,12 +29,12 @@
     {% else %}
       <!-- paper: new coins start here; promote to live when ready -->
       <span class="badge badge-paper">paper (dry run)</span>
-      <form action="/coin/{{ coin.id }}/status" method="post"
+      <form action="{{ url_for('coin_status', coin_id=coin.id) }}" method="post"
             onsubmit="return confirmStatus('{{ coin.slug }}', 'paper', 'live')">
         <input type="hidden" name="status" value="live">
         <button type="submit" class="btn btn-red">⚠ enable live</button>
       </form>
-      <form action="/coin/{{ coin.id }}/status" method="post">
+      <form action="{{ url_for('coin_status', coin_id=coin.id) }}" method="post">
         <input type="hidden" name="status" value="paused">
         <button type="submit" class="btn">pause</button>
       </form>
@@ -112,7 +112,7 @@ function confirmStatus(slug, current, target) {
       <td class="muted">{{ o.reason }}</td>
       <td class="muted" style="font-size:0.8em;">{{ o.ts }}</td>
       <td>
-        <form action="/coin/{{ coin.id }}/config/delete" method="post">
+        <form action="{{ url_for('coin_config_delete', coin_id=coin.id) }}" method="post">
           <input type="hidden" name="key" value="{{ o.key }}">
           <button type="submit" class="btn btn-red" style="padding:2px 8px;">x</button>
         </form>
@@ -125,7 +125,7 @@ function confirmStatus(slug, current, target) {
   <p class="muted">No overrides -- using fleet defaults for all parameters.</p>
   {% endif %}
 
-  <form action="/coin/{{ coin.id }}/config" method="post">
+  <form action="{{ url_for('coin_config_save', coin_id=coin.id) }}" method="post">
     <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end;">
       <div>
         <div class="muted" style="font-size:0.8em; margin-bottom:2px;">Key</div>
@@ -235,5 +235,5 @@ function confirmStatus(slug, current, target) {
   {% endif %}
 </div>
 
-<p><a href="/">&larr; Dashboard</a></p>
+<p><a href="{{ url_for('dashboard') }}">&larr; Dashboard</a></p>
 {% endblock %}

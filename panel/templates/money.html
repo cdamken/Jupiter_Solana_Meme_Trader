@@ -26,7 +26,7 @@
 
   <div class="card" style="flex:1; min-width:240px;">
     <h2>Deposit USDC</h2>
-    <form action="/deposit" method="post" style="display:flex; gap:8px; align-items:center;">
+    <form action="{{ url_for('deposit') }}" method="post" style="display:flex; gap:8px; align-items:center;">
       <input type="number" name="amount" step="0.01" min="0.01" placeholder="25.00" style="width:120px">
       <button type="submit" class="btn btn-green">Deposit</button>
     </form>
@@ -35,7 +35,7 @@
 
   <div class="card" style="flex:1; min-width:240px;">
     <h2>Record withdrawal</h2>
-    <form action="/withdraw" method="post" style="display:flex; gap:8px; align-items:center;">
+    <form action="{{ url_for('withdraw') }}" method="post" style="display:flex; gap:8px; align-items:center;">
       <input type="number" name="amount" step="0.01" min="0.01" placeholder="25.00" style="width:120px">
       <button type="submit" class="btn btn-red">Withdraw</button>
     </form>
@@ -70,5 +70,5 @@
   {% endif %}
 </div>
 
-<p><a href="/">&larr; Dashboard</a></p>
+<p><a href="{{ url_for('dashboard') }}">&larr; Dashboard</a></p>
 {% endblock %}

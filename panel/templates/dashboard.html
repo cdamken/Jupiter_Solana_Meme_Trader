@@ -63,13 +63,13 @@
     <tbody>
     {% for c in coins %}
     <tr>
-      <td><a href="/coin/{{ c.id }}">{{ c.slug }}</a></td>
+      <td><a href="{{ url_for('coin_detail', coin_id=c.id) }}">{{ c.slug }}</a></td>
       <td>{{ c.label }}</td>
       <td><span class="badge badge-{{ c.status }}">{{ c.status }}</span></td>
       <td>{{ c.lots }}</td>
       <td>${{ "%.2f"|format(c.deployed) }}</td>
       <td class="{{ 'pos' if c.realized >= 0 else 'neg' }}">${{ "%.2f"|format(c.realized) }}</td>
-      <td><a href="/coin/{{ c.id }}">edit</a></td>
+      <td><a href="{{ url_for('coin_detail', coin_id=c.id) }}">edit</a></td>
     </tr>
     {% endfor %}
     </tbody>
@@ -107,7 +107,7 @@
     {% for t in fleet_trades %}
     <tr data-coin="{{ t.slug }}" data-side="{{ t.side }}" data-txsig="{{ t.txsig or '' }}">
       <td class="muted" style="font-size:0.8em; white-space:nowrap;">{{ t.ts }}</td>
-      <td><a href="/coin/{{ t.coin_id }}">{{ t.label }}</a></td>
+      <td><a href="{{ url_for('coin_detail', coin_id=t.coin_id) }}">{{ t.label }}</a></td>
       <td><span class="badge badge-{{ t.mode }}">{{ t.mode }}</span></td>
       <td class="{{ 'pos' if t.side == 'sell' else '' }}">{{ t.side }}</td>
       <td>${{ "%.6f"|format(t.price) if t.price else '-' }}</td>
@@ -170,7 +170,7 @@ function exportFtCsv() {
 
   <div class="card" style="flex:1; min-width:300px;">
     <h2>Add coin</h2>
-    <form action="/coin/add" method="post">
+    <form action="{{ url_for('coin_add') }}" method="post">
       <table>
         <tr><td class="muted">Slug</td><td><input type="text" name="slug" placeholder="simd" style="width:160px"></td></tr>
         <tr><td class="muted">Label</td><td><input type="text" name="label" placeholder="SIMD" style="width:160px"></td></tr>
@@ -183,12 +183,12 @@ function exportFtCsv() {
 
   <div class="card" style="flex:1; min-width:240px;">
     <h2>Deposit USDC</h2>
-    <form action="/deposit" method="post" style="display:flex; gap:8px; align-items:center;">
+    <form action="{{ url_for('deposit') }}" method="post" style="display:flex; gap:8px; align-items:center;">
       <input type="number" name="amount" step="0.01" min="0.01" placeholder="25.00" style="width:120px">
       <button type="submit" class="btn btn-green">Deposit</button>
     </form>
     <p class="muted" style="margin-top:8px; font-size:0.8em;">Updates the ledger mirror. Actual USDC must already be in the wallet.</p>
-    <p class="muted" style="margin-top:4px; font-size:0.8em;"><a href="/money">View deposit/withdrawal history →</a></p>
+    <p class="muted" style="margin-top:4px; font-size:0.8em;"><a href="{{ url_for('money') }}">View deposit/withdrawal history →</a></p>
   </div>
 
 </div>
