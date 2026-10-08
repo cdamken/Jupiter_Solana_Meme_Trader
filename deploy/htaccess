@@ -1,0 +1,4 @@
+RewriteEngine On
+RewriteBase /carlos/jupiter/
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^ index.php [L,QSA]
