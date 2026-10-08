@@ -4,7 +4,7 @@
  * Forwards all requests to the Flask backend at 127.0.0.1:8791 (keepalive.sh).
  * Protected by .htaccess Basic Auth (inherit from /carlos/hub/ or add its own).
  * Shared secret (X-Panel-Token) read from .panel_token next to this file. */
-$backend = "http://127.0.0.1:8791";
+$backend = "http://127.0.0.1:8800";
 
 // Strip the /carlos/jupiter prefix from the path
 $path = parse_url($_SERVER["REQUEST_URI"], PHP_URL_PATH);
@@ -49,7 +49,7 @@ curl_close($ch);
 if ($resp === false || $code === 0) {
     http_response_code(502);
     echo "<h2>Jupiter panel unavailable</h2>"
-       . "<p>Backend (127.0.0.1:8791) not responding. "
+       . "<p>Backend (127.0.0.1:8800) not responding. "
        . "Check keepalive.sh is in carlos crontab (*/1 * * * *).</p>";
     exit;
 }

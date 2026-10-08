@@ -2,7 +2,7 @@
 # keepalive.sh — keeps the Jupiter panel backend (127.0.0.1:8791) alive as user carlos.
 # Called by cron every minute.
 # Detects liveness by port, not process name (reliable).
-PORT=8791
+PORT=8800
 if python3 -c "import socket,sys; s=socket.socket(); sys.exit(0 if s.connect_ex(('127.0.0.1',$PORT))==0 else 1)" 2>/dev/null; then
     exit 0
 fi
