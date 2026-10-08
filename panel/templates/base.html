@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+{% if panel_base %}<base href="{{ panel_base }}">{% endif %}
 <title>{% block title %}Jupiter{% endblock %}</title>
 <style>
 *, *::before, *::after { box-sizing: border-box; }

@@ -1,58 +1,377 @@
 {% extends "base.html" %}
 {% block title %}Jupiter — Glossary{% endblock %}
+
 {% block content %}
 
-<div class="card" style="margin-bottom:16px;">
-  <p class="muted" style="margin:0; font-size:0.9em;">
-    All configurable parameters. Fleet-only parameters are set in fleet defaults and apply to all coins;
-    coin-allowed parameters can be overridden per coin. Hover the row for the full description.
-    Locked-visible parameters are shown but cannot be changed through the panel.
-  </p>
-</div>
+{# ── inline data for JS ─────────────────────────────────────────────── #}
+<script>
+const FLEET  = {{ fleet_defaults | tojson }};
+const CCFG   = {{ coin_configs   | tojson }};
+const COINS  = {{ coins          | tojson }};
+</script>
 
-{% set scopes = ['fleet-only', 'coin-allowed', 'coin-only'] %}
-{% for scope in scopes %}
-  {% set group = catalog | selectattr("scope", "eq", scope) | list %}
-  {% if group %}
-  <div class="card">
-    <h2>{{ scope }}</h2>
-    <table>
-      <thead><tr>
-        <th>Key</th><th>Label</th><th>Type</th>
-        <th>Default</th><th>Recommended</th><th>Range</th><th>Description</th>
-      </tr></thead>
-      <tbody>
-      {% for p in group %}
-      <tr style="{% if p.tier == 'locked-visible' %}opacity:0.55;{% elif p.tier == 'experimental' %}opacity:0.7;{% endif %}"
-          title="{{ p.help }}">
-        <td style="font-family:monospace; font-size:0.85em; white-space:nowrap;">
-          {{ p.key }}
-          {% if p.tier == 'locked-visible' %}
-            <span class="muted" style="font-size:0.75em;">[locked]</span>
-          {% elif p.tier == 'experimental' %}
-            <span style="color:#d29922; font-size:0.75em;">[exp]</span>
-          {% endif %}
-        </td>
-        <td>{{ p.label }}</td>
-        <td class="muted" style="font-size:0.8em;">{{ p.type }}</td>
-        <td style="font-family:monospace; font-size:0.85em;">{{ p.default_val or '-' }}</td>
-        <td style="font-family:monospace; font-size:0.85em; color:#58a6ff;">{{ p.recommended or '-' }}</td>
-        <td class="muted" style="font-size:0.8em; white-space:nowrap;">
-          {% if p.min is not none and p.max is not none %}{{ p.min }} – {{ p.max }}{% else %}-{% endif %}
-        </td>
-        <td class="muted" style="font-size:0.85em; max-width:320px;">{{ p.help }}</td>
-      </tr>
+<style>
+/* ── layout ──────────────────────────────────────────────────────────── */
+.gloss-wrap {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  min-height: 60vh;
+}
+
+/* sidebar */
+.gloss-sidebar {
+  flex: 0 0 210px;
+  position: sticky;
+  top: 16px;
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+}
+.coin-btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: none;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text, #e6edf3);
+  font-size: 0.88em;
+  transition: background 0.15s;
+  margin-bottom: 2px;
+}
+.coin-btn:hover   { background: rgba(255,255,255,0.06); }
+.coin-btn.active  { background: rgba(88,166,255,0.18); color: #58a6ff; }
+.coin-badge {
+  font-size: 0.68em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.badge-live  { background: rgba(63,185,80,0.25);  color: #3fb950; }
+.badge-paper { background: rgba(210,153,34,0.25); color: #d29922; }
+.badge-fleet { background: rgba(130,80,255,0.2);  color: #b57bff; }
+
+/* main panel */
+.gloss-main { flex: 1; min-width: 0; }
+
+/* how-it-works intro */
+.intro-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 14px;
+  margin-top: 14px;
+}
+.intro-box {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.intro-box strong { display: block; margin-bottom: 4px; font-size: 0.95em; }
+.intro-box p { margin: 0; font-size: 0.84em; line-height: 1.55; color: rgba(200,210,220,0.7); }
+
+/* parameter section */
+.scope-section { margin-bottom: 16px; }
+.scope-title {
+  font-size: 0.72em;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: rgba(200,210,220,0.45);
+  margin: 0 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+.param-row {
+  padding: 16px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.param-row:last-child { border-bottom: none; padding-bottom: 4px; }
+.param-headline {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 7px;
+}
+.param-label   { font-size: 1em; font-weight: 600; }
+.param-key     {
+  font-size: 0.78em;
+  font-family: monospace;
+  background: rgba(255,255,255,0.08);
+  padding: 1px 7px;
+  border-radius: 4px;
+  color: #a5d6ff;
+}
+.param-meta    { font-size: 0.76em; color: rgba(200,210,220,0.5); }
+.param-rec     { font-size: 0.76em; color: #58a6ff; }
+.param-help    {
+  margin: 0;
+  font-size: 0.86em;
+  line-height: 1.65;
+  color: rgba(200,210,220,0.68);
+  max-width: 680px;
+}
+
+/* value display (per-coin or fleet) */
+.param-value-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.val-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.82em;
+  padding: 3px 10px;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  font-family: monospace;
+}
+.val-fleet    { background: rgba(130,80,255,0.1);  border-color: rgba(130,80,255,0.3); color: #b57bff; }
+.val-override { background: rgba(88,166,255,0.1);  border-color: rgba(88,166,255,0.3); color: #58a6ff; }
+.val-label    { font-size: 0.78em; opacity: 0.7; font-family: inherit; }
+.val-hidden   { display: none; }
+
+/* ── mobile ──────────────────────────────────────────────────────────── */
+@media (max-width: 700px) {
+  .gloss-wrap {
+    flex-direction: column;
+    gap: 12px;
+  }
+  .gloss-sidebar {
+    flex: none;
+    width: 100%;
+    position: static;
+    max-height: none;
+    overflow-x: auto;
+    overflow-y: visible;
+  }
+  .sidebar-inner {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 6px;
+    padding-bottom: 4px;
+  }
+  .coin-btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+    margin-bottom: 0;
+  }
+  .sidebar-title { display: none; }
+}
+</style>
+
+{# ── page layout ────────────────────────────────────────────────────── #}
+<div class="gloss-wrap">
+
+  {# ── sidebar: coin selector ─────────────────────────── #}
+  <aside class="gloss-sidebar card" style="padding:12px;">
+    <p class="sidebar-title muted" style="margin:0 0 10px; font-size:0.75em; text-transform:uppercase; letter-spacing:0.08em;">View as</p>
+    <div class="sidebar-inner" id="coinList">
+
+      <button class="coin-btn active" data-coin="fleet" onclick="selectCoin('fleet', this)">
+        <span class="coin-badge badge-fleet">Fleet</span>
+        Fleet defaults
+      </button>
+
+      {% for coin in coins %}
+      <button class="coin-btn" data-coin="{{ coin.id }}" onclick="selectCoin({{ coin.id }}, this)">
+        <span class="coin-badge {{ 'badge-live' if coin.status == 'live' else 'badge-paper' }}">
+          {{ coin.status }}
+        </span>
+        {{ coin.label }}
+      </button>
       {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% endif %}
-{% endfor %}
 
-{% if not catalog %}
-<div class="card">
-  <p class="muted">No parameters in catalog yet. Run bootstrap.py to seed the fleet defaults.</p>
-</div>
-{% endif %}
+      {% if not coins %}
+      <p class="muted" style="font-size:0.82em; margin:0;">No active coins yet.</p>
+      {% endif %}
+
+    </div>
+  </aside>
+
+  {# ── main content ────────────────────────────────────── #}
+  <div class="gloss-main">
+
+    {# intro card #}
+    <div class="card" style="margin-bottom:16px;">
+      <h2 style="margin-top:0; margin-bottom:6px;">How the bot trades</h2>
+      <p style="margin:0 0 14px; font-size:0.9em; line-height:1.6; color:rgba(200,210,220,0.75);">
+        Buy dips in fixed lots, sell each lot above its own cost — never on an average, never at a loss.
+        Every parameter below adjusts one piece of that loop.
+      </p>
+      <div class="intro-grid">
+        <div class="intro-box">
+          <strong>Lot</strong>
+          <p>One buy of LOT_USD. The book is a list of lots, each tracking its own cost.
+             All sell rules apply per lot, so a cheap lot never subsidizes an expensive one.</p>
+        </div>
+        <div class="intro-box">
+          <strong>Never sell at a loss</strong>
+          <p>The hard rule: a lot only sells when effective proceeds (after fee and slippage)
+             exceed what it cost. A price drop turns lots into inventory waiting for recovery,
+             never into a realized loss.</p>
+        </div>
+        <div class="intro-box">
+          <strong>Grid</strong>
+          <p>Buy a lot every &minus;BUY_STEP_PCT% drop; sell each lot at +SELL_STEP_PCT% above
+             its cost. Asymmetric steps (e.g. 5% buy / 12% sell) buy dips often while
+             extracting a bigger margin on the way out.</p>
+        </div>
+        <div class="intro-box">
+          <strong>Trailing sell</strong>
+          <p>Instead of selling the instant a lot hits its target, track the price peak and
+             sell only when it retraces SELL_TRAIL_PCT% from it — never below the target.
+             Lets winners run further on strong pumps.</p>
+        </div>
+        <div class="intro-box">
+          <strong>Relative ceiling</strong>
+          <p>No buys above the Nth percentile of the coin's own 14-day price history.
+             Prevents the grid from accumulating near local tops; adapts every tick as the
+             market moves.</p>
+        </div>
+        <div class="intro-box">
+          <strong>Price gate</strong>
+          <p>If a price tick jumps more than PRICE_GATE_PCT% from the previous reading,
+             treat it as bad data and skip the tick entirely. Guards against feed glitches and
+             flash-spike decisions.</p>
+        </div>
+      </div>
+    </div>
+
+    {# ── parameter sections grouped by scope ── #}
+    {% set scope_order = ['fleet-only', 'coin-allowed', 'coin-only'] %}
+    {% set scope_labels = {
+      'fleet-only':   ('Fleet-only parameters', 'Applied uniformly to all coins. Set in fleet defaults; cannot be overridden per coin.'),
+      'coin-allowed': ('Coin-allowed parameters', 'Default comes from fleet defaults but each coin can override it individually.'),
+      'coin-only':    ('Coin-only parameters',    'Only meaningful per coin; not part of fleet defaults.'),
+    } %}
+
+    {% for scope in scope_order %}
+      {% set group = catalog | selectattr("scope", "eq", scope) | list %}
+      {% if group %}
+      <div class="card scope-section" style="margin-bottom:16px;">
+        {% set info = scope_labels[scope] %}
+        <h3 style="margin-top:0; margin-bottom:2px; font-size:1em;">{{ info[0] }}</h3>
+        <p class="muted" style="margin:0 0 16px; font-size:0.82em;">{{ info[1] }}</p>
+
+        {% for p in group %}
+        <div class="param-row" data-param="{{ p.key }}">
+          <div class="param-headline">
+            <span class="param-label">{{ p.label }}</span>
+            <span class="param-key">{{ p.key }}</span>
+            {% if p.tier == 'locked-visible' %}
+              <span class="param-meta">[locked]</span>
+            {% elif p.tier == 'experimental' %}
+              <span style="color:#d29922; font-size:0.76em;">[experimental]</span>
+            {% endif %}
+            {% if p.type %}
+              <span class="param-meta">{{ p.type }}</span>
+            {% endif %}
+            {% if p.min is not none and p.max is not none %}
+              <span class="param-meta">{{ p.min }}–{{ p.max }}</span>
+            {% endif %}
+            {% if p.recommended is not none %}
+              <span class="param-rec">recommended&nbsp;{{ p.recommended }}</span>
+            {% endif %}
+          </div>
+          <p class="param-help">{{ p.help }}</p>
+
+          {# value display: updated by JS when a coin is selected #}
+          <div class="param-value-row" id="val-{{ p.key }}">
+            {# fleet default badge (always visible initially) #}
+            <span class="val-box val-fleet" id="vf-{{ p.key }}">
+              <span class="val-label">fleet default</span>
+              {{ p.default_val if p.default_val is not none else '—' }}
+            </span>
+            {# coin value badge: shown when a coin is selected #}
+            <span class="val-box val-override val-hidden" id="vc-{{ p.key }}"></span>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    {% endfor %}
+
+    {% if not catalog %}
+    <div class="card">
+      <p class="muted">No parameters in catalog yet. Run bootstrap.py to seed the fleet defaults.</p>
+    </div>
+    {% endif %}
+
+  </div>{# /gloss-main #}
+</div>{# /gloss-wrap #}
+
+<script>
+let currentCoin = 'fleet';
+
+function selectCoin(coinId, btn) {
+  // update sidebar active state
+  document.querySelectorAll('.coin-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  currentCoin = coinId;
+  renderValues(coinId);
+}
+
+function renderValues(coinId) {
+  const isFleet = coinId === 'fleet';
+
+  document.querySelectorAll('[data-param]').forEach(row => {
+    const key = row.dataset.param;
+    const fleetVal = FLEET[key] ?? '—';
+    const vf = document.getElementById('vf-' + key);
+    const vc = document.getElementById('vc-' + key);
+
+    if (isFleet) {
+      // show fleet badge only
+      vf.classList.remove('val-hidden');
+      vc.classList.add('val-hidden');
+      // reset fleet badge to default text
+      vf.innerHTML = '<span class="val-label">fleet default</span> ' + htmlEsc(fleetVal);
+      vf.className = 'val-box val-fleet';
+    } else {
+      const cfg = CCFG[coinId];
+      if (!cfg) return;
+      const effectiveVal = cfg.effective[key] ?? '—';
+      const isOverride   = cfg.overrides.includes(key);
+
+      if (isOverride) {
+        // show both: fleet (dimmed) + coin override (highlighted)
+        vf.classList.remove('val-hidden');
+        vf.innerHTML = '<span class="val-label">fleet</span> ' + htmlEsc(fleetVal);
+        vf.className = 'val-box val-fleet';
+        vc.classList.remove('val-hidden');
+        vc.innerHTML = '<span class="val-label">this coin</span> ' + htmlEsc(effectiveVal);
+        vc.className = 'val-box val-override';
+      } else {
+        // using fleet default — show the effective value with fleet styling
+        vf.classList.remove('val-hidden');
+        vf.innerHTML = '<span class="val-label">fleet default</span> ' + htmlEsc(effectiveVal);
+        vf.className = 'val-box val-fleet';
+        vc.classList.add('val-hidden');
+      }
+    }
+  });
+}
+
+function htmlEsc(s) {
+  return String(s)
+    .replace(/&/g,'&amp;')
+    .replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;');
+}
+
+// init: show fleet defaults on load
+renderValues('fleet');
+</script>
 
 {% endblock %}

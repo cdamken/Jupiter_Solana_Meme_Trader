@@ -27,6 +27,8 @@ from flask import Flask, render_template, request, redirect, url_for, flash, jso
 import config as cfg
 from store.store import Store
 
+PANEL_BASE = os.environ.get("PANEL_BASE", "")   # e.g. "/carlos/jupiter/" when behind PHP proxy
+
 app = Flask(__name__, template_folder="templates")
 app.secret_key = os.environ.get("PANEL_SECRET", "change-me-in-production")
 
@@ -283,7 +285,40 @@ def glossary():
         "SELECT key, tier, scope, type, label, help, default_val, recommended, min, max"
         " FROM param_catalog ORDER BY scope, key"
     ).fetchall()
-    return render_template("glossary.html", catalog=[dict(r) for r in catalog])
+
+    # Fleet defaults (pinned version)
+    pinned = store._c.execute(
+        "SELECT version_id FROM fleet_versions WHERE pinned=1 ORDER BY version_id DESC LIMIT 1"
+    ).fetchone()
+    fleet_defaults = {}
+    if pinned:
+        rows = store._c.execute(
+            "SELECT key, value FROM fleet_defaults WHERE version_id=?",
+            (pinned["version_id"],),
+        ).fetchall()
+        fleet_defaults = {r["key"]: r["value"] for r in rows}
+
+    # Active coins + their effective configs + which keys are overridden
+    coins = store.get_active_coins()
+    coin_configs = {}
+    for coin in coins:
+        effective = store.get_config(coin["id"])
+        ov_rows = store._c.execute(
+            "SELECT key FROM coin_overrides WHERE coin_id=?", (coin["id"],)
+        ).fetchall()
+        override_keys = [r["key"] for r in ov_rows]
+        coin_configs[coin["id"]] = {
+            "effective": effective,
+            "overrides": override_keys,
+        }
+
+    return render_template(
+        "glossary.html",
+        catalog=[dict(r) for r in catalog],
+        coins=[dict(r) for r in coins],
+        fleet_defaults=fleet_defaults,
+        coin_configs=coin_configs,
+    )
 
 
 @app.get("/money")
@@ -349,6 +384,11 @@ def deposit():
     store.usdc_deposit(amount)
     flash(f"Deposited ${amount:.2f} USDC", "ok")
     return redirect(url_for("dashboard"))
+
+
+@app.context_processor
+def _inject_base():
+    return {"panel_base": PANEL_BASE}
 
 
 if __name__ == "__main__":
