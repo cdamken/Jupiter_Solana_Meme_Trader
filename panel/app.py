@@ -1,3 +1,4 @@
+from __future__ import annotations
 """panel/app.py — Flask panel for Jupiter multi-coin bot.
 
 Routes:

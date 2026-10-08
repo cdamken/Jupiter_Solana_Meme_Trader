@@ -4,6 +4,7 @@ One connection per thread (threading.local). Schema applied at open().
 All money mutations go through the usdc_ledger reserve/commit/release protocol
 so concurrent per-coin decisions in one tick never double-spend.
 """
+from __future__ import annotations
 import os
 import sqlite3
 import threading
@@ -35,6 +36,23 @@ class Store:
     def __init__(self, db_path: str):
         self._path = db_path
         self._c = _conn(db_path)
+        self._in_tx = False
+
+    def begin(self):
+        self._c.execute("BEGIN IMMEDIATE")
+        self._in_tx = True
+
+    def commit(self):
+        self._c.commit()
+        self._in_tx = False
+
+    def rollback(self):
+        self._c.rollback()
+        self._in_tx = False
+
+    def _auto_commit(self):
+        if not self._in_tx:
+            self._c.commit()
 
     # ---- coins ----
 
@@ -58,14 +76,24 @@ class Store:
             " VALUES (?,?,?,?,?,?)",
             (slug, label, mint, status, migrated_from, decimals),
         )
-        self._c.commit()
+        self._auto_commit()
         return cur.lastrowid
 
     def set_coin_status(self, coin_id: int, status: str):
         self._c.execute(
             "UPDATE coins SET status = ? WHERE id = ?", (status, coin_id)
         )
-        self._c.commit()
+        self._auto_commit()
+
+    def get_active_coins(self) -> list[sqlite3.Row]:
+        return self._c.execute(
+            "SELECT * FROM coins WHERE status IN ('paper','live')"
+        ).fetchall()
+
+    def get_trades(self, coin_id: int) -> list[sqlite3.Row]:
+        return self._c.execute(
+            "SELECT * FROM trades WHERE coin_id = ? ORDER BY ts ASC", (coin_id,)
+        ).fetchall()
 
     # ---- config resolution ----
 
@@ -102,19 +130,38 @@ class Store:
             " VALUES (?,?,?,?,?,?)",
             (coin_id, tokens, cost, buy_price, ts, origin),
         )
-        self._c.commit()
+        self._auto_commit()
         return cur.lastrowid
 
     def remove_lot(self, lot_id: int):
         self._c.execute("DELETE FROM lots WHERE id = ?", (lot_id,))
-        self._c.commit()
+        self._auto_commit()
 
     def update_lot_trail(self, lot_id: int, trail_armed: int, trail_peak: float):
         self._c.execute(
             "UPDATE lots SET trail_armed = ?, trail_peak = ? WHERE id = ?",
             (trail_armed, trail_peak, lot_id),
         )
-        self._c.commit()
+        self._auto_commit()
+
+    def update_lot_origin(self, lot_id: int, origin: str):
+        self._c.execute(
+            "UPDATE lots SET origin = ? WHERE id = ?", (origin, lot_id),
+        )
+        self._auto_commit()
+
+    def set_lot_levels_to(self, lot_id: int, target_id: int | None):
+        self._c.execute(
+            "UPDATE lots SET levels_to = ? WHERE id = ?", (target_id, lot_id),
+        )
+        self._auto_commit()
+
+    def remove_lots(self, lot_ids: list[int]):
+        if not lot_ids:
+            return
+        placeholders = ",".join("?" * len(lot_ids))
+        self._c.execute(f"DELETE FROM lots WHERE id IN ({placeholders})", lot_ids)
+        self._auto_commit()
 
     # ---- USDC ledger (reserve / commit / release) ----
 
@@ -135,17 +182,17 @@ class Store:
 
     def usdc_reserve(self, amount: float, coin_id: int) -> bool:
         """Lock `amount` USDC for a pending buy. Returns False if insufficient balance."""
-        with self._c:
-            free = self.usdc_balance()
-            if free < amount:
-                return False
-            self._ledger_entry(-amount, "reserve", coin_id=coin_id)
-            return True
+        free = self.usdc_balance()
+        if free < amount:
+            return False
+        self._ledger_entry(-amount, "reserve", coin_id=coin_id)
+        self._auto_commit()
+        return True
 
     def usdc_release(self, amount: float, coin_id: int):
         """Release a previously reserved amount (swap failed or skipped)."""
-        with self._c:
-            self._ledger_entry(amount, "release", coin_id=coin_id)
+        self._ledger_entry(amount, "release", coin_id=coin_id)
+        self._auto_commit()
 
     def usdc_commit_buy(self, amount: float, coin_id: int, txsig: str):
         """Mark a buy as executed (reservation already applied the debit).
@@ -154,29 +201,28 @@ class Store:
         can distinguish a completed buy (reserve + buy marker) from an orphaned
         one (reserve only, no follow-up entry).
         """
-        with self._c:
-            self._ledger_entry(0.0, "buy", coin_id=coin_id, txsig=txsig)
-            self._c.execute(
-                "INSERT INTO trades (coin_id, ts, mode, side, signal, price, tokens, usd, pnl_pct, txsig)"
-                " SELECT c.id, datetime('now'), c.status, 'buy', 'grid', 0, 0, ?, null, ?"
-                " FROM coins c WHERE c.id = ?",
-                (amount, txsig, coin_id),
-            )
+        self._ledger_entry(0.0, "buy", coin_id=coin_id, txsig=txsig)
+        self._c.execute(
+            "INSERT INTO trades (coin_id, ts, mode, side, signal, price, tokens, usd, pnl_pct, txsig)"
+            " SELECT c.id, datetime('now'), c.status, 'buy', 'grid', 0, 0, ?, null, ?"
+            " FROM coins c WHERE c.id = ?",
+            (amount, txsig, coin_id),
+        )
+        self._auto_commit()
 
     def usdc_commit_sell(self, proceeds: float, coin_id: int, txsig: str,
                          price: float, tokens: float, pnl_pct: float, mode: str):
-        with self._c:
-            self._ledger_entry(proceeds, "sell", coin_id=coin_id, txsig=txsig)
-            self._c.execute(
-                "INSERT INTO trades (coin_id, ts, mode, side, signal, price, tokens, usd, pnl_pct, txsig)"
-                " VALUES (?, datetime('now'), ?, 'sell', 'grid', ?, ?, ?, ?, ?)",
-                (coin_id, mode, price, tokens, proceeds, pnl_pct, txsig),
-            )
+        self._ledger_entry(proceeds, "sell", coin_id=coin_id, txsig=txsig)
+        self._c.execute(
+            "INSERT INTO trades (coin_id, ts, mode, side, signal, price, tokens, usd, pnl_pct, txsig)"
+            " VALUES (?, datetime('now'), ?, 'sell', 'grid', ?, ?, ?, ?, ?)",
+            (coin_id, mode, price, tokens, proceeds, pnl_pct, txsig),
+        )
+        self._auto_commit()
 
     def usdc_deposit(self, amount: float):
-        with self._c:
-            self._ledger_entry(amount, "deposit")
-            self._c.commit()
+        self._ledger_entry(amount, "deposit")
+        self._auto_commit()
 
     # ---- price history ----
 
@@ -185,7 +231,7 @@ class Store:
             "INSERT OR REPLACE INTO price_history (coin_id, ts, price) VALUES (?,?,?)",
             (coin_id, ts, price),
         )
-        self._c.commit()
+        self._auto_commit()
 
     def price_window(self, coin_id: int, since_ts: float) -> list[float]:
         rows = self._c.execute(
@@ -193,6 +239,12 @@ class Store:
             (coin_id, since_ts),
         ).fetchall()
         return [r["price"] for r in rows]
+
+    def price_window_rows(self, coin_id: int, since_ts: float) -> list[sqlite3.Row]:
+        return self._c.execute(
+            "SELECT ts, price FROM price_history WHERE coin_id = ? AND ts >= ? ORDER BY ts ASC",
+            (coin_id, since_ts),
+        ).fetchall()
 
     # ---- capital ----
 
@@ -208,7 +260,66 @@ class Store:
             " max_usd=excluded.max_usd, ts=datetime('now')",
             (coin_id, deployed_usd, max_usd),
         )
-        self._c.commit()
+        self._auto_commit()
+
+    # ---- coin_state (per-coin KV) ----
+
+    def state_get(self, coin_id: int, key: str, default: str | None = None) -> str | None:
+        row = self._c.execute(
+            "SELECT value FROM coin_state WHERE coin_id = ? AND key = ?",
+            (coin_id, key),
+        ).fetchone()
+        return row["value"] if row else default
+
+    def state_get_float(self, coin_id: int, key: str, default: float = 0.0) -> float:
+        v = self.state_get(coin_id, key)
+        if v is None:
+            return default
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return default
+
+    def state_get_int(self, coin_id: int, key: str, default: int = 0) -> int:
+        v = self.state_get(coin_id, key)
+        if v is None:
+            return default
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return default
+
+    def state_set(self, coin_id: int, key: str, value) -> None:
+        self._c.execute(
+            "INSERT INTO coin_state (coin_id, key, value) VALUES (?,?,?)"
+            " ON CONFLICT(coin_id, key) DO UPDATE SET value = excluded.value",
+            (coin_id, key, str(value)),
+        )
+
+    def state_set_commit(self, coin_id: int, key: str, value) -> None:
+        self.state_set(coin_id, key, value)
+        self._auto_commit()
+
+    def state_mget(self, coin_id: int) -> dict[str, str]:
+        rows = self._c.execute(
+            "SELECT key, value FROM coin_state WHERE coin_id = ?", (coin_id,)
+        ).fetchall()
+        return {r["key"]: r["value"] for r in rows}
+
+    def state_mset(self, coin_id: int, updates: dict[str, str | float | int]) -> None:
+        for k, v in updates.items():
+            self.state_set(coin_id, k, v)
+
+    def state_mset_commit(self, coin_id: int, updates: dict[str, str | float | int]) -> None:
+        self.state_mset(coin_id, updates)
+        self._auto_commit()
+
+    def state_delete(self, coin_id: int, key: str) -> None:
+        self._c.execute(
+            "DELETE FROM coin_state WHERE coin_id = ? AND key = ?",
+            (coin_id, key),
+        )
+        self._auto_commit()
 
     # ---- startup reconciliation ----
 
@@ -248,7 +359,7 @@ class Store:
                 "reconcile: releasing orphaned reserve id=%d coin=%s amount=%.2f",
                 row["id"], coin_id, amount,
             )
-            with self._c:
-                self._ledger_entry(amount, "release", coin_id=coin_id)
+            self._ledger_entry(amount, "release", coin_id=coin_id)
+            self._auto_commit()
 
         return len(orphans)

@@ -1,3 +1,4 @@
+from __future__ import annotations
 """alerts.py — Email alerts for Jupiter.
 
 Sends alerts on trades, errors, and consecutive price feed failures.

@@ -149,14 +149,15 @@ def sol_balance_lamports(rpc_url: str, pubkey: str) -> int | None:
 
 # ---- Paper mode ----
 
-def paper_buy(store, coin_id: int, usd: float, price: float, ts: float) -> str:
+def paper_buy(store, coin_id: int, usd: float, price: float, ts: float,
+              origin: str = "grid") -> str:
     """Record a paper buy. Returns a fake txsig."""
     if price <= 0:
         return ""
     tokens = usd / price
     if not store.usdc_reserve(usd, coin_id):
         return ""
-    lot_id = store.add_lot(coin_id, tokens, usd, price, ts, "paper")
+    lot_id = store.add_lot(coin_id, tokens, usd, price, ts, origin)
     store.usdc_commit_buy(usd, coin_id, f"paper-buy-{lot_id}")
     log.info("[paper] BUY coin=%d tokens=%.4f price=%.6f usd=%.2f lot=%d",
              coin_id, tokens, price, usd, lot_id)
@@ -184,7 +185,7 @@ def paper_sell(store, coin_id: int, lot: dict, price: float, mode: str = "paper"
 def live_buy(store, coin_id: int, usd: float, price: float, ts: float,
              rpc_url: str, keypair_path: str, quote_mint: str,
              token_mint: str, gas_reserve_lamports: int,
-             token_decimals: int = 6) -> str:
+             token_decimals: int = 6, origin: str = "grid") -> str:
     """Execute a real buy swap via Jupiter. Returns txsig or '' on failure."""
     kp = load_keypair(keypair_path)
     wallet = str(kp.pubkey())
@@ -251,7 +252,7 @@ def live_buy(store, coin_id: int, usd: float, price: float, ts: float,
         return ""
 
     tokens_out = int(quote.get("outAmount", 0)) / (10 ** token_decimals)
-    lot_id = store.add_lot(coin_id, tokens_out, usd, eff_price, ts, "live")
+    lot_id = store.add_lot(coin_id, tokens_out, usd, eff_price, ts, origin)
     store.usdc_commit_buy(usd, coin_id, txsig)
     log.info("[live] BUY coin=%d tokens=%.4f price=%.6f usd=%.2f lot=%d txsig=%s",
              coin_id, tokens_out, eff_price, usd, lot_id, txsig)
@@ -328,4 +329,61 @@ def live_sell(store, coin_id: int, lot: dict, price: float,
     store.usdc_commit_sell(proceeds, coin_id, txsig, eff_price, tokens, pnl_pct, "live")
     log.info("[live] SELL coin=%d tokens=%.4f price=%.6f proceeds=%.2f pnl=%.1f%% txsig=%s",
              coin_id, tokens, eff_price, proceeds, pnl_pct, txsig)
+    return txsig
+
+
+# ---- Gas refill (USDC -> SOL) ----
+
+SOL_MINT = "So11111111111111111111111111111111111111112"
+
+
+def gas_refill(store, refill_usdc: float, rpc_url: str, keypair_path: str,
+               quote_mint: str) -> str:
+    """Swap USDC -> SOL to refill gas. LIVE only. Returns txsig or ''."""
+    kp = load_keypair(keypair_path)
+    wallet = str(kp.pubkey())
+
+    in_amount = int(refill_usdc * 1e6)
+
+    quote_url = (
+        f"{JUPITER_QUOTE_URL}?inputMint={quote_mint}&outputMint={SOL_MINT}"
+        f"&amount={in_amount}&slippageBps=300"
+    )
+    quote = _get_json(quote_url)
+    if not quote:
+        log.warning("gas_refill: quote failed")
+        return ""
+
+    swap_payload = {
+        "quoteResponse": quote,
+        "userPublicKey": wallet,
+        "wrapAndUnwrapSol": True,
+    }
+    swap_resp = _post_json(JUPITER_SWAP_URL, swap_payload)
+    if not swap_resp or "swapTransaction" not in swap_resp:
+        log.warning("gas_refill: no swapTransaction")
+        return ""
+
+    if not order_avoids_foreign_signer(swap_resp, wallet):
+        return ""
+
+    try:
+        from solders.transaction import VersionedTransaction  # type: ignore
+        from solana.rpc.api import Client  # type: ignore
+
+        raw = base64.b64decode(swap_resp["swapTransaction"])
+        tx = VersionedTransaction.from_bytes(raw)
+        tx.sign([kp])
+        client = Client(rpc_url)
+        result = client.send_raw_transaction(bytes(tx))
+        txsig = str(result.value)
+    except Exception as e:
+        log.error("gas_refill: send failed: %s", e)
+        return ""
+
+    store.usdc_deposit(-refill_usdc)
+
+    sol_out = int(quote.get("outAmount", 0)) / 1e9
+    log.info("[live] GAS REFILL %.2f USDC -> %.5f SOL txsig=%s",
+             refill_usdc, sol_out, txsig)
     return txsig

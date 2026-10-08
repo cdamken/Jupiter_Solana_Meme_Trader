@@ -7,10 +7,12 @@ if python3 -c "import socket,sys; s=socket.socket(); sys.exit(0 if s.connect_ex(
     exit 0
 fi
 cd "$HOME/jupiter" || exit 1
+PYTHON="$HOME/jupiter/.venv/bin/python3"
+[ -x "$PYTHON" ] || PYTHON=python3
 # Load .env so config.py can read RPC_URL / KEYPAIR_PATH / QUOTE_MINT
 set -a; source .env; set +a
 JUPITER_DB="$HOME/jupiter/store/jupiter.db" \
 PANEL_PORT=$PORT \
 PANEL_BASE="/carlos/jupiter/" \
 PANEL_SECRET="$(cat "$HOME/jupiter/.panel_secret" 2>/dev/null || echo 'change-me')" \
-  setsid python3 -m panel.app >> "$HOME/jupiter/panel.log" 2>&1 < /dev/null &
+  setsid "$PYTHON" -m panel.app >> "$HOME/jupiter/panel.log" 2>&1 < /dev/null &
