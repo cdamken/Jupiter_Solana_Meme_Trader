@@ -179,6 +179,21 @@ CREATE TABLE IF NOT EXISTS trades (
 );
 CREATE INDEX IF NOT EXISTS ix_trades_coin_ts ON trades(coin_id, ts);
 
+-- Decision ledger (#502): one row per tick decision for measurement/calibration.
+-- action = what the tick did; reason = what gate determined it. detail is a JSON
+-- blob with the numbers behind the decision (price, ref, step, cash, etc.).
+-- Pruned by age like price_history (app rotates, never the schema).
+CREATE TABLE IF NOT EXISTS decisions (
+    id           INTEGER PRIMARY KEY,
+    coin_id      INTEGER NOT NULL REFERENCES coins(id) ON DELETE CASCADE,
+    ts           REAL NOT NULL,
+    action       TEXT NOT NULL,
+    reason       TEXT NOT NULL,
+    price        REAL,
+    detail       TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_decisions_coin_ts ON decisions(coin_id, ts);
+
 -- Per-coin runtime state (KV). Replaces SIMD's flat JSON state dict. Every key
 -- that the scheduler/engine needs between ticks lives here: ref price, price-gate
 -- candidates, floor episode, last_sell_ts, etc. Mutated in the SAME transaction
