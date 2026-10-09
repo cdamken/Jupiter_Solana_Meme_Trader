@@ -515,6 +515,16 @@ CATALOG = [
         "validating behavior in paper first. Never set this to 'live' unless all new coins "
         "should start in live mode immediately.",
     ),
+
+    # ── Execution ───────────────────────────────────────────────────────────
+    (
+        "MAX_SLIPPAGE_BPS", "editable", "coin-allowed", "int", "50", "1000", "150", "150",
+        "Max slippage (basis points)",
+        "Maximum allowed slippage for Jupiter swaps in basis points (100 bps = 1%). "
+        "Applied to both buy and sell quotes. Gas refills use a separate, higher default (300 bps). "
+        "SIMD measured median slippage ~0% and worst 0.52% on $40 clips — 150 bps (1.5%) "
+        "gives comfortable headroom for meme tokens. Increase for low-liquidity pairs.",
+    ),
 ]
 
 FLEET_DEFAULTS = {row[0]: row[6] for row in CATALOG}

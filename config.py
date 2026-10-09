@@ -43,6 +43,7 @@ SMTP_PORT            = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USER            = os.environ.get("SMTP_USER", "")
 SMTP_PASS            = os.environ.get("SMTP_PASS", "")
 DEFAULT_MODE         = os.environ.get("DEFAULT_MODE", "paper")
+MAX_SLIPPAGE_BPS     = int(os.environ.get("MAX_SLIPPAGE_BPS", "150"))
 
 # Store path — override in tests via JUPITER_DB env var
 DB_PATH = os.environ.get("JUPITER_DB", "store/jupiter.db")

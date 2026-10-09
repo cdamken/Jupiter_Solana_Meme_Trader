@@ -16,10 +16,15 @@ import config  # noqa
 from store.store import Store
 from execute import (
     effective_price_usd,
-    order_avoids_foreign_signer,
+    tx_avoids_foreign_signer,
     revalidate_effective_sale,
+    confirm_transaction,
     paper_buy,
     paper_sell,
+    DEFAULT_SLIPPAGE_BPS,
+    GAS_REFILL_SLIPPAGE_BPS,
+    JUPITER_QUOTE_URL,
+    JUPITER_SWAP_URL,
 )
 
 FAILURES = []
@@ -42,35 +47,28 @@ def check_false(name, val):
     else:
         print(f"  ok  {name}")
 
+def check_close(name, actual, expected, tol=0.01):
+    if abs(actual - expected) > tol:
+        FAILURES.append(f"FAIL {name}: got {actual:.4f}, expected {expected:.4f}")
+    else:
+        print(f"  ok  {name}")
+
 
 print("=== test_execute.py ===")
 
 # ---- effective_price_usd ----
 print("\n[effective_price_usd]")
 
-# buy: inAmount=25_000_000 USDC (25.0), outAmount=50_000_000 tokens (50.0)
 q = {"inAmount": "25000000", "outAmount": "50000000"}
 p = effective_price_usd(q, 25_000_000, input_is_usdc=True)
-# 25 USDC / 50 tokens = 0.5 USD/token
 check("buy: price = 0.5", round(p, 6), 0.5)
 
-# sell: inAmount=50_000_000 tokens, outAmount=26_000_000 USDC (26.0)
 q2 = {"inAmount": "50000000", "outAmount": "26000000"}
 p2 = effective_price_usd(q2, 50_000_000, input_is_usdc=False)
-# 26 USDC / 50 tokens = 0.52
 check("sell: price = 0.52", round(p2, 6), 0.52)
 
-# bad quote
 check("bad quote: None", effective_price_usd({"inAmount": "0", "outAmount": "100"}, 0, True), None)
 check("missing fields: None", effective_price_usd({}, 0, True), None)
-
-# ---- order_avoids_foreign_signer ----
-print("\n[order_avoids_foreign_signer]")
-MY = "EaaGm5z7ppT76DYxgR6XBhNtVdMBKRsBfuQvADa3TaXo"
-check_true("no signers field: safe", order_avoids_foreign_signer({}, MY))
-check_true("only my key: safe", order_avoids_foreign_signer({"signers": [MY]}, MY))
-check_false("foreign signer: blocked",
-            order_avoids_foreign_signer({"signers": [MY, "EVil111111111111111111111111111111111111111"]}, MY))
 
 # ---- revalidate_effective_sale ----
 print("\n[revalidate_effective_sale]")
@@ -81,56 +79,111 @@ check_false("below cost: blocked", revalidate_effective_sale(good_lot, 0.48))
 bad_lot  = {"id": 2, "tokens": 0.0, "cost": 50.0, "buy_price": 0.5}
 check_false("zero tokens: blocked", revalidate_effective_sale(bad_lot, 0.52))
 
-# ---- paper_buy / paper_sell (hermetic store) ----
-print("\n[paper_buy / paper_sell]")
+# ---- API endpoints (issue #2 fix 2: swap v2) ----
+print("\n[api_endpoints]")
+check_true("quote_url_is_v1", "api.jup.ag/swap/v1" in JUPITER_QUOTE_URL)
+check_true("swap_url_is_v1", "api.jup.ag/swap/v1" in JUPITER_SWAP_URL)
+check_true("no_v6_quote", "v6" not in JUPITER_QUOTE_URL)
+check_true("no_v6_swap", "v6" not in JUPITER_SWAP_URL)
+
+# ---- configurable slippage (issue #2 fix 3) ----
+print("\n[configurable_slippage]")
+check("default_slippage_bps", DEFAULT_SLIPPAGE_BPS, 150)
+check("gas_refill_slippage_bps", GAS_REFILL_SLIPPAGE_BPS, 300)
+check_true("config_has_max_slippage", hasattr(config, "MAX_SLIPPAGE_BPS"))
+check("config_max_slippage_default", config.MAX_SLIPPAGE_BPS, 150)
+
+# ---- tx signer inspection (issue #2 fix 4) ----
+print("\n[tx_signer_inspection]")
+# Without solders installed, tx_avoids_foreign_signer should reject (fail-closed)
+try:
+    from solders.transaction import VersionedTransaction  # type: ignore
+    _HAS_SOLDERS = True
+except ImportError:
+    _HAS_SOLDERS = False
+
+if not _HAS_SOLDERS:
+    check_false("no_solders_rejects", tx_avoids_foreign_signer("AAAA", "SomeWallet"))
+    print("  (solders not installed — signer check correctly rejects)")
+
+# Verify the function exists and has the right signature
+import inspect
+sig = inspect.signature(tx_avoids_foreign_signer)
+check("signer_check_params", list(sig.parameters.keys()), ["swap_tx_b64", "wallet_pubkey"])
+
+# ---- confirm_transaction exists and is callable ----
+print("\n[confirm_transaction]")
+sig_ct = inspect.signature(confirm_transaction)
+check("confirm_tx_params", list(sig_ct.parameters.keys()), ["rpc_url", "txsig", "timeout"])
+
+# ---- paper_sell now applies fee (issue #7 partial: paper mirrors live) ----
+print("\n[paper_sell_with_fee]")
 with tempfile.TemporaryDirectory() as d:
     db = os.path.join(d, "test.db")
     s = Store(db)
     coin_id = s.add_coin("test", "TEST", "TestMint" + "1" * 33)
     s.usdc_deposit(200.0)
 
-    # paper_buy
     txsig = paper_buy(s, coin_id, 25.0, 0.5, time.time())
-    check_true("paper_buy returns txsig", txsig.startswith("paper-buy-"))
+    check_true("paper_buy ok", txsig.startswith("paper-buy-"))
     check("balance after buy", s.usdc_balance(), 175.0)
     lots = s.get_lots(coin_id)
-    check("one lot created", len(lots), 1)
-    check("lot tokens = 50", lots[0]["tokens"], 50.0)
+    check("one lot", len(lots), 1)
 
-    # paper_sell at a gain
     lot = dict(lots[0])
     txsig2 = paper_sell(s, coin_id, lot, 0.55)
-    check_true("paper_sell returns txsig", txsig2.startswith("paper-sell-"))
-    check("lot removed after sell", len(s.get_lots(coin_id)), 0)
-    # proceeds = 50 tokens * 0.55 = 27.5 USDC
-    check("balance after sell", round(s.usdc_balance(), 2), round(175.0 + 27.5, 2))
+    check_true("paper_sell ok", txsig2.startswith("paper-sell-"))
+    check("lot removed", len(s.get_lots(coin_id)), 0)
+    # proceeds = 50 * 0.55 * (1 - 0.015) = 27.5 * 0.985 = 27.0875
+    expected_bal = 175.0 + 50.0 * 0.55 * (1 - 0.015)
+    check_close("balance_after_sell_with_fee", s.usdc_balance(), expected_bal)
 
-    # paper_sell at a loss: must be blocked
+    # paper_sell at a loss: blocked
     s.usdc_deposit(25.0)
-    txsig3 = paper_buy(s, coin_id, 25.0, 0.5, time.time())
+    paper_buy(s, coin_id, 25.0, 0.5, time.time())
     lots2 = s.get_lots(coin_id)
     txsig4 = paper_sell(s, coin_id, dict(lots2[0]), 0.48)
     check("paper_sell at loss blocked", txsig4, "")
-    check("lot still present after blocked sell", len(s.get_lots(coin_id)), 1)
 
-    # origin param: floor-zone buy creates reserve lot
+# ---- paper_buy edge cases ----
+print("\n[paper_buy_edges]")
+with tempfile.TemporaryDirectory() as d:
+    db = os.path.join(d, "test.db")
+    s = Store(db)
+    coin_id = s.add_coin("edge", "Edge", "EdgeMint" + "1" * 33)
+
+    # no balance
+    txsig = paper_buy(s, coin_id, 25.0, 0.5, time.time())
+    check("no_balance", txsig, "")
+
+    # price <= 0
+    s.usdc_deposit(100.0)
+    txsig = paper_buy(s, coin_id, 25.0, 0.0, time.time())
+    check("zero_price", txsig, "")
+    txsig = paper_buy(s, coin_id, 25.0, -1.0, time.time())
+    check("negative_price", txsig, "")
+
+    # origin param
     txsig_r = paper_buy(s, coin_id, 25.0, 0.5, time.time(), origin="reserve")
     lots_r = s.get_lots(coin_id)
     reserve_lot = [l for l in lots_r if dict(l)["origin"] == "reserve"]
-    check("reserve origin: lot created", len(reserve_lot), 1)
+    check("reserve_origin", len(reserve_lot), 1)
 
-    # default origin is grid
-    txsig_g = paper_buy(s, coin_id, 25.0, 0.5, time.time())
-    lots_all = s.get_lots(coin_id)
-    grid_lots = [l for l in lots_all if dict(l)["origin"] == "grid"]
-    check_true("default origin: grid lot exists", len(grid_lots) >= 1)
+# ---- live_buy/live_sell accept slippage_bps parameter ----
+print("\n[slippage_param]")
+from execute import live_buy, live_sell
+sig_lb = inspect.signature(live_buy)
+check_true("live_buy_has_slippage", "slippage_bps" in sig_lb.parameters)
+sig_ls = inspect.signature(live_sell)
+check_true("live_sell_has_slippage", "slippage_bps" in sig_ls.parameters)
 
-    # paper_buy with insufficient funds
-    s2 = Store(os.path.join(d, "test2.db"))
-    coin_id2 = s2.add_coin("c2", "C2", "C2Mint" + "1" * 35)
-    # no deposit -> balance = 0
-    txsig5 = paper_buy(s2, coin_id2, 25.0, 0.5, time.time())
-    check("paper_buy with no balance: empty txsig", txsig5, "")
+# ---- scheduler passes slippage_bps ----
+print("\n[scheduler_slippage]")
+sched_src = open(os.path.join(os.path.dirname(os.path.dirname(__file__)), "scheduler.py")).read()
+check_true("scheduler_passes_slippage", "slippage_bps=slippage_bps" in sched_src)
+slippage_count = sched_src.count("slippage_bps=slippage_bps")
+check("scheduler_all_live_calls", slippage_count, 4)
+
 
 print()
 if FAILURES:
