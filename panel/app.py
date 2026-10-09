@@ -425,7 +425,11 @@ def overview():
     last_trade = store._c.execute(
         "SELECT MAX(ts) AS ts FROM trades"
     ).fetchone()
-    last_trade_ts = last_trade["ts"] if last_trade and last_trade["ts"] else None
+    _lt = last_trade["ts"] if last_trade else None
+    try:
+        last_trade_ts = _dt.datetime.fromisoformat(str(_lt)).timestamp() if _lt else None
+    except (ValueError, TypeError):
+        last_trade_ts = None
 
     # Ledger summary: recent non-trade entries (reserve/release orphans, deposits)
     recent_ledger = store._c.execute(
