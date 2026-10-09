@@ -109,6 +109,19 @@ CATALOG = [
         "A rejected tick is logged but never triggers a trade.",
     ),
 
+    # ── Price feed (#1030) ──────────────────────────────────────────────────────
+    (
+        "PRICE_PAIR_ADDRESS", "editable", "coin-allowed", "text", None, None, "", "",
+        "Pinned DexScreener pair address",
+        "Empty (default) = the price comes from the most-liquid SOL pair of our token on DexScreener "
+        "(liquidity-weighted pick, #283). "
+        "Set to a DexScreener pairAddress to pin the price feed to ONE specific pool. "
+        "FAIL-CLOSED: if the pinned pair is absent or malformed, the result is None (no-data tick), "
+        "never a fallback to the liquidity pick. This prevents the pool-switch glitch (#1006) where "
+        "DexScreener served a different pool and the bot traded on a wrong price. "
+        "Find the address on DexScreener: the pool page URL contains it.",
+    ),
+
     # ── Volatility-adaptive steps ─────────────────────────────────────────────
     (
         "VOL_ADAPTIVE", "editable", "coin-allowed", "bool", None, None, "0", "0",
