@@ -257,23 +257,21 @@ def grid_decision(
     buy_usd = 0.0
     new_ref = ref
 
-    # Rebuy gap: skip buy if price hasn't pulled back enough from last sell
+    # Rebuy gap and ceiling: block the BUY but not the ref re-anchor
+    rebuy_ok = True
     if last_sell and last_sell > 0 and rebuy_gap_pct > 0:
         if price >= last_sell * (1.0 - rebuy_gap_pct / 100.0):
-            return {"sells": sells, "buy_usd": 0.0, "new_ref": ref,
-                    "trail_updates": trail_updates}
-
-    # Ceiling blocks new buys
-    if ceiling and price >= ceiling:
-        return {"sells": sells, "buy_usd": 0.0, "new_ref": ref,
-                "trail_updates": trail_updates}
+            rebuy_ok = False
+    ceil_ok = ceiling is None or price <= ceiling
 
     if ref is None:
         new_ref = price   # first tick: set ref, no buy
     elif price <= ref * (1.0 - buy_step / 100.0):
-        if cash >= lot_usd:
+        new_ref = price   # re-anchor downward whether it buys or not
+        if ceil_ok and rebuy_ok and cash >= lot_usd:
             buy_usd = lot_usd
-            new_ref = price   # ref follows each buy downward
+    elif price >= ref * (1.0 + buy_step / 100.0):
+        new_ref = price   # re-anchor upward, no buy
 
     return {
         "sells": sells,
@@ -684,7 +682,7 @@ def price_gate(price: float, last: float, max_step_pct: float,
         cand_n += 1
         if cand_n >= consensus_n:
             return price, 0.0, 0    # consensus: re-anchor to the new level
-        return None, cand, cand_n   # still building consensus
+        return None, price, cand_n  # still building consensus, candidate follows latest
     # New outlier direction: start a fresh candidate
     return None, price, 1
 
