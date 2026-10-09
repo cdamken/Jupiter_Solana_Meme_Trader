@@ -248,6 +248,14 @@ class Store:
 
     # ---- capital ----
 
+    def fleet_deployed_usd(self) -> float:
+        """Total deployed USD across all active coins."""
+        row = self._c.execute(
+            "SELECT COALESCE(SUM(deployed_usd), 0.0) AS total FROM capital"
+            " WHERE coin_id IN (SELECT id FROM coins WHERE status IN ('paper','live'))"
+        ).fetchone()
+        return row["total"]
+
     def get_capital(self, coin_id: int) -> sqlite3.Row | None:
         return self._c.execute(
             "SELECT * FROM capital WHERE coin_id = ?", (coin_id,)

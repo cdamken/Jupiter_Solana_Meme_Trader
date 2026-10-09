@@ -54,6 +54,14 @@ CATALOG = [
         "tune it once you know the coin's liquidity and how deep its drawdowns run.",
     ),
     (
+        "MAX_CAPITAL_PCT", "editable", "fleet-only", "float", "0", "100", "30", "30",
+        "Max capital concentration %",
+        "0 = off. >0 = no single coin may deploy more than X% of the fleet's total capital "
+        "(deployed + cash). Tighten-only: the effective cap = min(MAX_CAPITAL_USD, fleet_total * pct/100). "
+        "A coin already over its share has headroom 0 and all further auto buys are skipped (no forced sells). "
+        "Set to 30 per SIMD's fleet-wide calibration (CHILLGUY incident 09.10.2026).",
+    ),
+    (
         "SELL_TRAIL", "editable", "coin-allowed", "bool", None, None, "0", "0",
         "Trailing sell",
         "0 = fixed exit: each lot sells the instant it crosses its +SELL_STEP_PCT target. "
