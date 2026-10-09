@@ -317,7 +317,12 @@ def tick_coin(store: Store, coin: dict, force_mode: str | None = None):
             log.info("coin=%d slug=%s: prebuy lot %d graduated to grid", coin_id, coin["slug"], gid)
 
     # --- Pairing (#412): combined group sale for stuck lots ---
+    # LIVE guard (#3): pairing has no on-chain swap path yet; block in live mode
     use_pairing = _cfg_bool(cfg, "PAIRING_GRID", False)
+    if use_pairing and mode == "live":
+        log.warning("coin=%d slug=%s: PAIRING_GRID blocked in live mode (no swap path, issue #3)",
+                    coin_id, coin["slug"])
+        use_pairing = False
     if use_pairing:
         pair_threshold = _cfg_float(cfg, "PAIRING_GRID_THRESHOLD_PCT", 20.0)
         pair_stuck_days = _cfg_float(cfg, "PAIRING_GRID_STUCK_DAYS", 7.0)
@@ -360,7 +365,7 @@ def tick_coin(store: Store, coin: dict, force_mode: str | None = None):
                     store.remove_lots(group_ids)
                     store.usdc_commit_sell(proceeds, coin_id,
                                           f"paper-pair-{group_ids[0]}",
-                                          price, total_tokens, pnl_pct, mode)
+                                          price, total_tokens, pnl_pct, "paper")
                     store.state_mset(coin_id, {
                         "last_sell_price": price,
                         "last_sell_ts": ts,
