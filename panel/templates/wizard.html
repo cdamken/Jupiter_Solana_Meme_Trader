@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+{% block title %}Jupiter — Add Coin{% endblock %}
+{% block page_name %}Add Coin Wizard{% endblock %}
+
+{% block content %}
+<div class="card" id="wiz">
+  <div class="head"><h2>Step 1 — Mint address</h2></div>
+
+  <div style="display:flex; gap:10px; align-items:center; margin-bottom:14px;">
+    <input type="text" id="mint-input" placeholder="Paste Solana mint address…" style="flex:1; font-family:var(--mono); font-size:14px;">
+    <button class="btn btn-primary" onclick="validateMint()" id="validate-btn">Validate</button>
+  </div>
+  <div id="mint-status" style="font-size:14px;"></div>
+</div>
+
+<div class="card" id="step2" style="display:none;">
+  <div class="head"><h2>Step 2 — Token confirmed</h2></div>
+  <div class="stats" style="margin-bottom:16px;">
+    <div class="stat">
+      <div class="sl">Name</div>
+      <div class="sv" id="tok-name" style="font-size:16px;">—</div>
+    </div>
+    <div class="stat">
+      <div class="sl">Symbol</div>
+      <div class="sv" id="tok-symbol" style="font-size:16px;">—</div>
+    </div>
+    <div class="stat">
+      <div class="sl">Price</div>
+      <div class="sv" id="tok-price" style="font-size:16px;">—</div>
+    </div>
+  </div>
+
+  <h2 style="margin:18px 0 10px; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.07em; color:var(--mut);">Pairs by liquidity</h2>
+  <div style="overflow-x:auto;">
+  <table class="led" id="pair-table">
+    <thead><tr>
+      <th></th><th>DEX</th><th>Quote</th>
+      <th style="text-align:right">Liquidity</th>
+      <th style="text-align:right">Price</th>
+      <th>Pair address</th>
+    </tr></thead>
+    <tbody id="pair-body"></tbody>
+  </table>
+  </div>
+  <p class="mut" style="font-size:12px; margin-top:8px;">Select a pair to pin PRICE_PAIR_ADDRESS (recommended for stable feed). Leave unselected to use highest-liquidity auto-pick.</p>
+</div>
+
+<div class="card" id="step3" style="display:none;">
+  <div class="head"><h2>Step 3 — Parameters & deploy</h2></div>
+  <form action="{{ url_for('coin_add') }}" method="post" id="add-form">
+    <input type="hidden" name="mint" id="form-mint">
+    <input type="hidden" name="pair_address" id="form-pair">
+
+    <div style="display:grid; gap:12px; max-width:420px;">
+      <div style="display:flex; gap:10px; align-items:center;">
+        <label class="mut" style="font-size:13px; min-width:100px;">Slug</label>
+        <input type="text" name="slug" id="form-slug" placeholder="bonk" style="flex:1" required pattern="[a-z][a-z0-9_]{0,19}">
+        <span class="mut" style="font-size:12px;">a-z, lowercase</span>
+      </div>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <label class="mut" style="font-size:13px; min-width:100px;">Label</label>
+        <input type="text" name="label" id="form-label" placeholder="BONK" style="flex:1">
+      </div>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <label class="mut" style="font-size:13px; min-width:100px;">Decimals</label>
+        <input type="number" name="decimals" id="form-decimals" value="6" min="0" max="18" style="width:80px">
+        <span class="mut" style="font-size:12px;">(6 = pump.fun, 9 = SOL)</span>
+      </div>
+
+      <hr style="border:0; border-top:1px solid var(--line); margin:6px 0;">
+
+      <div style="display:flex; gap:10px; align-items:center;">
+        <label class="mut" style="font-size:13px; min-width:100px;">Lot USD</label>
+        <input type="number" name="lot_usd" id="form-lot" value="10" min="1" step="1" style="width:100px">
+        <span class="mut" style="font-size:12px;">probation: $10 recommended</span>
+      </div>
+      <div style="display:flex; gap:10px; align-items:center;">
+        <label class="mut" style="font-size:13px; min-width:100px;">Max capital</label>
+        <input type="number" name="max_capital" id="form-cap" value="{{ max_capital }}" min="10" step="10" style="width:100px">
+        <span class="mut" style="font-size:12px;">USDC ceiling for this coin</span>
+      </div>
+
+      <div class="note-box" style="margin-top:8px;">
+        ⚠ Coin starts in <strong>paper</strong> mode. Switch to live from the coin detail page after verifying it ticks.
+      </div>
+
+      <div style="margin-top:4px;">
+        <button type="submit" class="btn btn-accent" id="submit-btn" disabled>Add coin (paper)</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<div class="card" id="step-back" style="display:none; text-align:center;">
+  <a href="{{ url_for('dashboard') }}" class="btn btn-ghost">← Back to dashboard</a>
+</div>
+
+<script>
+var tokenData = null;
+
+function validateMint() {
+  var mint = document.getElementById('mint-input').value.trim();
+  if (!mint) return;
+  var btn = document.getElementById('validate-btn');
+  var status = document.getElementById('mint-status');
+  btn.disabled = true;
+  btn.textContent = 'Checking…';
+  status.innerHTML = '<span class="mut">Looking up on DexScreener…</span>';
+
+  fetch('{{ url_for("api_validate_mint") }}?mint=' + encodeURIComponent(mint))
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      btn.disabled = false;
+      btn.textContent = 'Validate';
+      if (!d.ok) {
+        status.innerHTML = '<span style="color:var(--warn)">✗ ' + d.error + '</span>';
+        document.getElementById('step2').style.display = 'none';
+        document.getElementById('step3').style.display = 'none';
+        return;
+      }
+      status.innerHTML = '<span style="color:var(--ok)">✓ Token found on DexScreener</span>';
+      tokenData = d;
+      showStep2(mint, d);
+    })
+    .catch(function(e) {
+      btn.disabled = false;
+      btn.textContent = 'Validate';
+      status.innerHTML = '<span style="color:var(--warn)">✗ Network error: ' + e.message + '</span>';
+    });
+}
+
+function showStep2(mint, d) {
+  document.getElementById('tok-name').textContent = d.name || '—';
+  document.getElementById('tok-symbol').textContent = d.symbol || '—';
+  document.getElementById('tok-price').textContent = d.price ? ('$' + Number(d.price).toFixed(8)) : '—';
+
+  var body = document.getElementById('pair-body');
+  body.innerHTML = '';
+  (d.pairs || []).forEach(function(p, i) {
+    var tr = document.createElement('tr');
+    tr.style.cursor = 'pointer';
+    tr.onclick = function() { selectPair(i, p.address); };
+    tr.innerHTML =
+      '<td><input type="radio" name="pair_sel" value="' + (p.address||'') + '" ' + (i===0?'checked':'') + '></td>' +
+      '<td>' + (p.dex||'—') + '</td>' +
+      '<td>' + (p.quote||'—') + '</td>' +
+      '<td style="text-align:right">$' + Number(p.liquidity||0).toLocaleString() + '</td>' +
+      '<td style="text-align:right">' + (p.price ? '$'+Number(p.price).toFixed(8) : '—') + '</td>' +
+      '<td class="mut" style="font-family:var(--mono); font-size:12px;">' + (p.address||'').substring(0,12) + '…</td>';
+    body.appendChild(tr);
+  });
+  document.getElementById('step2').style.display = '';
+
+  // Pre-fill step 3
+  document.getElementById('form-mint').value = mint;
+  var sym = (d.symbol || '').toLowerCase().replace(/[^a-z0-9]/g, '').substring(0, 20);
+  document.getElementById('form-slug').value = sym;
+  document.getElementById('form-label').value = d.symbol || '';
+  document.getElementById('form-pair').value = d.pairs && d.pairs.length ? d.pairs[0].address : '';
+  document.getElementById('step3').style.display = '';
+  document.getElementById('step-back').style.display = '';
+  document.getElementById('submit-btn').disabled = false;
+}
+
+function selectPair(idx, addr) {
+  document.getElementById('form-pair').value = addr || '';
+  var radios = document.querySelectorAll('input[name="pair_sel"]');
+  radios.forEach(function(r, i) { r.checked = (i === idx); });
+}
+
+document.getElementById('mint-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') { e.preventDefault(); validateMint(); }
+});
+</script>
+{% endblock %}
