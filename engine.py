@@ -732,3 +732,69 @@ def drop_least_gain_lot(plan_lots, price):
         return list(plan_lots)
     worst = min(range(len(plan_lots)), key=lambda i: _lot_gain_pct(plan_lots[i], price))
     return [l for i, l in enumerate(plan_lots) if i != worst]
+
+
+# ---------------------------------------------------------------------------
+# Manual sell tiers (#929 from SIMD)
+# ---------------------------------------------------------------------------
+
+def book_sell_allowed(lots: list[dict], price: float, fee: float = 0.015,
+                      min_profit_pct: float = 3.0) -> dict:
+    """BOOK_SELL: sell the whole coin book only if combined proceeds net of fees
+    exceed the combined cost by min_profit_pct%. PURE.
+
+    Returns dict with keys:
+      allowed: bool
+      total_cost: total cost of all lots
+      net_proceeds: proceeds after fee
+      pnl_pct: net P&L as a percentage
+    """
+    if not lots or price <= 0:
+        return {"allowed": False, "total_cost": 0.0, "net_proceeds": 0.0, "pnl_pct": 0.0}
+    total_cost = sum(float(l["cost"]) for l in lots)
+    total_tokens = sum(float(l["tokens"]) for l in lots)
+    gross_proceeds = total_tokens * price
+    net_proceeds = gross_proceeds * (1.0 - fee)
+    pnl_pct = (net_proceeds / total_cost - 1.0) * 100.0 if total_cost > 0 else 0.0
+    return {
+        "allowed": pnl_pct >= min_profit_pct,
+        "total_cost": total_cost,
+        "net_proceeds": net_proceeds,
+        "pnl_pct": pnl_pct,
+    }
+
+
+def lifetime_reset_allowed(lots: list[dict], price: float,
+                           realized_pnl: float, fee: float = 0.015) -> dict:
+    """LIFETIME RESET (#929): sell the ENTIRE book below cost ONLY when the
+    coin's lifetime realized P&L + executable book value - book cost > 0
+    (the coin's lifetime net stays positive). MANUAL only, never automatic.
+
+    Args:
+        lots:         current open lots
+        price:        current price
+        realized_pnl: lifetime realized P&L for this coin (sum of all closed trades' profit)
+        fee:          one-way fee fraction
+
+    Returns dict with keys:
+      allowed: bool — True if lifetime net stays positive after the reset
+      lifetime_net: what the lifetime net would be after the reset
+      book_cost: total cost of current lots
+      book_value: net proceeds from selling at current price
+      realized_pnl: the passed-in realized P&L
+    """
+    if not lots or price <= 0:
+        return {"allowed": False, "lifetime_net": realized_pnl,
+                "book_cost": 0.0, "book_value": 0.0, "realized_pnl": realized_pnl}
+    book_cost = sum(float(l["cost"]) for l in lots)
+    total_tokens = sum(float(l["tokens"]) for l in lots)
+    book_value = total_tokens * price * (1.0 - fee)
+    loss_on_reset = book_value - book_cost
+    lifetime_net = realized_pnl + loss_on_reset
+    return {
+        "allowed": lifetime_net > 0,
+        "lifetime_net": lifetime_net,
+        "book_cost": book_cost,
+        "book_value": book_value,
+        "realized_pnl": realized_pnl,
+    }
