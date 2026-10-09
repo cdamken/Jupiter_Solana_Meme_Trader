@@ -34,6 +34,7 @@ from vol_engine import realized_vol, vol_steps
 from execute import (
     fetch_price, paper_buy, paper_sell, live_buy, live_sell,
     sol_balance_lamports, gas_refill, load_keypair,
+    paper_batch_sell, preflight_batch_shrink,
 )
 import alerts as _alerts
 
@@ -408,36 +409,65 @@ def tick_coin(store: Store, coin: dict, force_mode: str | None = None):
 
     # Sells - lot deletion + trade row + state in one tx
     slug = coin["slug"]
-    for lot in decision["sells"]:
-        store.begin()
-        try:
-            if mode == "live":
-                txsig = live_sell(
-                    store, coin_id, lot, price,
-                    rpc_url=config.RPC_URL,
-                    keypair_path=config.KEYPAIR_PATH,
-                    quote_mint=config.QUOTE_MINT,
-                    token_mint=mint,
-                    gas_reserve_lamports=config.GAS_RESERVE_LAMPORTS,
-                    token_decimals=coin.get("decimals", 6),
-                    slippage_bps=slippage_bps,
-                )
-            else:
-                txsig = paper_sell(store, coin_id, lot, price, mode="paper")
+    sell_lots = decision["sells"]
+
+    # Batch mode: combine eligible lots into one swap
+    if use_batch and len(sell_lots) > 1:
+        sell_lots = preflight_batch_shrink(sell_lots, price)
+        if sell_lots:
+            store.begin()
+            try:
+                txsig = paper_batch_sell(store, coin_id, sell_lots, price, mode=mode)
+                if txsig:
+                    store.state_mset(coin_id, {
+                        "last_sell_price": price,
+                        "last_sell_ts": ts,
+                    })
+                    for lot in sell_lots:
+                        store.state_delete(coin_id, f"stuck_since_{lot['id']}")
+                store.commit()
+            except Exception:
+                store.rollback()
+                raise
             if txsig:
-                store.state_mset(coin_id, {
-                    "last_sell_price": price,
-                    "last_sell_ts": ts,
-                })
-                store.state_delete(coin_id, f"stuck_since_{lot['id']}")
-            store.commit()
-        except Exception:
-            store.rollback()
-            raise
-        if txsig:
-            pnl = (price - lot["buy_price"]) / lot["buy_price"] * 100.0
-            _alerts.alert_trade("sell", slug, lot["tokens"], price,
-                                lot["tokens"] * price, pnl, mode, **_smtp())
+                total_tokens = sum(l["tokens"] for l in sell_lots)
+                total_cost = sum(l["cost"] for l in sell_lots)
+                total_proceeds = total_tokens * price * 0.985
+                pnl = (total_proceeds - total_cost) / total_cost * 100.0 if total_cost > 0 else 0.0
+                _alerts.alert_trade("sell", slug, total_tokens, price,
+                                    total_proceeds, pnl, mode, **_smtp())
+    else:
+        # Serial single-lot sells (default or batch with 1 lot)
+        for lot in sell_lots:
+            store.begin()
+            try:
+                if mode == "live":
+                    txsig = live_sell(
+                        store, coin_id, lot, price,
+                        rpc_url=config.RPC_URL,
+                        keypair_path=config.KEYPAIR_PATH,
+                        quote_mint=config.QUOTE_MINT,
+                        token_mint=mint,
+                        gas_reserve_lamports=config.GAS_RESERVE_LAMPORTS,
+                        token_decimals=coin.get("decimals", 6),
+                        slippage_bps=slippage_bps,
+                    )
+                else:
+                    txsig = paper_sell(store, coin_id, lot, price, mode="paper")
+                if txsig:
+                    store.state_mset(coin_id, {
+                        "last_sell_price": price,
+                        "last_sell_ts": ts,
+                    })
+                    store.state_delete(coin_id, f"stuck_since_{lot['id']}")
+                store.commit()
+            except Exception:
+                store.rollback()
+                raise
+            if txsig:
+                pnl = (price - lot["buy_price"]) / lot["buy_price"] * 100.0
+                _alerts.alert_trade("sell", slug, lot["tokens"], price,
+                                    lot["tokens"] * price, pnl, mode, **_smtp())
 
     # --- Gas refill: after sells, live mode only ---
     use_gas_refill = _cfg_bool(cfg, "GAS_REFILL", False)
