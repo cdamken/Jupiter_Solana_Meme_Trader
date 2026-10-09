@@ -1,7 +1,7 @@
 """execute.py — LIVE and paper swap execution.
 
 Paper mode: logs the intent, records a fake lot, no network call.
-Live mode: Jupiter API quote -> route check -> Solana sign+send -> confirm.
+Live mode: Jupiter swap v2 API -> sign+send -> on-chain confirmation -> commit.
 
 All SIMD lessons applied:
 - User-Agent required on Jupiter POST or Cloudflare blocks (403/1010) (#17)
@@ -11,6 +11,10 @@ All SIMD lessons applied:
 - GAS_RESERVE_LAMPORTS: always check SOL balance before signing (#hard rule)
 - Never expose the private key outside load_keypair()
 - Never sell at a loss: revalidate_effective_sale() before every sell
+- On-chain confirmation before DB commit (issue #2 fix 1)
+- Jupiter swap v2 API (issue #2 fix 2)
+- Configurable slippage via MAX_SLIPPAGE_BPS (issue #2 fix 3)
+- Transaction signer inspection (issue #2 fix 4)
 """
 from __future__ import annotations
 import base64
@@ -24,8 +28,13 @@ import price_feed as pf
 
 log = logging.getLogger(__name__)
 
-JUPITER_QUOTE_URL = "https://quote-api.jup.ag/v6/quote"
-JUPITER_SWAP_URL  = "https://quote-api.jup.ag/v6/swap"
+JUPITER_QUOTE_URL = "https://api.jup.ag/swap/v1/quote"
+JUPITER_SWAP_URL  = "https://api.jup.ag/swap/v1/swap"
+
+DEFAULT_SLIPPAGE_BPS = 150
+GAS_REFILL_SLIPPAGE_BPS = 300
+TX_CONFIRM_TIMEOUT_S = 60
+TX_CONFIRM_POLL_S = 2
 
 _UA = "Mozilla/5.0 (compatible; JupiterTrader/1.0)"
 
@@ -103,24 +112,40 @@ def effective_price_usd(quote: dict, in_amount: int, input_is_usdc: bool) -> flo
         if out <= 0 or inp <= 0:
             return None
         if input_is_usdc:
-            # buying: inAmount is USDC (6 decimals), outAmount is tokens
             return inp / 1e6 / (out / 1e6)
         else:
-            # selling: inAmount is tokens, outAmount is USDC
             return out / 1e6 / (inp / 1e6)
     except (TypeError, ValueError, ZeroDivisionError):
         return None
 
 
-def order_avoids_foreign_signer(route: dict, wallet_pubkey: str) -> bool:
-    """Verify the swap route does not require a signer we do not control."""
-    if "signers" not in route:
+def tx_avoids_foreign_signer(swap_tx_b64: str, wallet_pubkey: str) -> bool:
+    """Inspect the serialized transaction for foreign signers.
+
+    Decodes the versioned transaction and checks that every required signer
+    is the wallet. This replaces the old no-op check that looked for a
+    top-level "signers" key (which v6 never had).
+    """
+    try:
+        from solders.transaction import VersionedTransaction  # type: ignore
+        raw = base64.b64decode(swap_tx_b64)
+        tx = VersionedTransaction.from_bytes(raw)
+        msg = tx.message
+        num_signers = msg.header().num_required_signatures
+        account_keys = msg.account_keys()
+        for i in range(num_signers):
+            key_str = str(account_keys[i])
+            if key_str != wallet_pubkey:
+                log.warning("Foreign signer at index %d: %s (wallet: %s)",
+                            i, key_str, wallet_pubkey)
+                return False
         return True
-    for s in route["signers"]:
-        if s != wallet_pubkey:
-            log.warning("Foreign signer detected in route: %s", s)
-            return False
-    return True
+    except ImportError:
+        log.warning("solders not installed — cannot verify signers, rejecting tx")
+        return False
+    except Exception as e:
+        log.warning("tx_avoids_foreign_signer: parse error: %s", e)
+        return False
 
 
 def revalidate_effective_sale(lot: dict, price: float, fee: float = 0.015) -> bool:
@@ -131,6 +156,39 @@ def revalidate_effective_sale(lot: dict, price: float, fee: float = 0.015) -> bo
         return False
     proceeds = price * tokens * (1 - fee)
     return proceeds > cost
+
+
+# ---- On-chain confirmation ----
+
+def confirm_transaction(rpc_url: str, txsig: str,
+                        timeout: float = TX_CONFIRM_TIMEOUT_S) -> bool:
+    """Poll RPC until the transaction is confirmed or times out.
+
+    Returns True if confirmed, False if expired/failed/timed out.
+    After send, the tx may or may not land — we MUST confirm before
+    committing to the DB (SIMD lesson: never assume state after sending).
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        payload = {
+            "jsonrpc": "2.0", "id": 1,
+            "method": "getSignatureStatuses",
+            "params": [[txsig], {"searchTransactionHistory": True}],
+        }
+        resp = _post_json(rpc_url, payload)
+        if resp:
+            statuses = resp.get("result", {}).get("value", [])
+            if statuses and statuses[0] is not None:
+                status = statuses[0]
+                if status.get("err") is not None:
+                    log.warning("tx %s failed on-chain: %s", txsig, status["err"])
+                    return False
+                conf = status.get("confirmationStatus", "")
+                if conf in ("confirmed", "finalized"):
+                    return True
+        time.sleep(TX_CONFIRM_POLL_S)
+    log.warning("tx %s: confirmation timed out after %.0fs", txsig, timeout)
+    return False
 
 
 # ---- SOL balance check ----
@@ -161,14 +219,15 @@ def paper_buy(store, coin_id: int, usd: float, price: float, ts: float,
     return f"paper-buy-{lot_id}"
 
 
-def paper_sell(store, coin_id: int, lot: dict, price: float, mode: str = "paper") -> str:
-    """Record a paper sell. Returns a fake txsig."""
-    if not revalidate_effective_sale(lot, price):
+def paper_sell(store, coin_id: int, lot: dict, price: float,
+               mode: str = "paper", fee: float = 0.015) -> str:
+    """Record a paper sell with fee applied (mirrors live accounting)."""
+    if not revalidate_effective_sale(lot, price, fee):
         log.warning("[paper] SELL blocked by hard rule: lot=%d price=%.6f", lot["id"], price)
         return ""
     tokens = lot["tokens"]
-    proceeds = tokens * price
-    pnl_pct = (price - lot["buy_price"]) / lot["buy_price"] * 100.0
+    proceeds = tokens * price * (1 - fee)
+    pnl_pct = (proceeds - lot["cost"]) / lot["cost"] * 100.0
     txsig = f"paper-sell-{lot['id']}"
     store.remove_lot(lot["id"])
     store.usdc_commit_sell(proceeds, coin_id, txsig, price, tokens, pnl_pct, mode)
@@ -179,34 +238,62 @@ def paper_sell(store, coin_id: int, lot: dict, price: float, mode: str = "paper"
 
 # ---- Live mode ----
 
+def _jupiter_quote(input_mint: str, output_mint: str,
+                   amount: int, slippage_bps: int) -> dict | None:
+    quote_url = (
+        f"{JUPITER_QUOTE_URL}?inputMint={input_mint}&outputMint={output_mint}"
+        f"&amount={amount}&slippageBps={slippage_bps}"
+    )
+    return _get_json(quote_url)
+
+
+def _jupiter_swap(quote: dict, wallet: str) -> dict | None:
+    swap_payload = {
+        "quoteResponse": quote,
+        "userPublicKey": wallet,
+        "wrapAndUnwrapSol": True,
+    }
+    return _post_json(JUPITER_SWAP_URL, swap_payload)
+
+
+def _sign_and_send(swap_tx_b64: str, kp, rpc_url: str) -> str | None:
+    """Sign a base64-encoded versioned transaction and send it. Returns txsig or None."""
+    try:
+        from solders.transaction import VersionedTransaction  # type: ignore
+        from solana.rpc.api import Client  # type: ignore
+
+        raw = base64.b64decode(swap_tx_b64)
+        tx = VersionedTransaction.from_bytes(raw)
+        tx.sign([kp])
+        client = Client(rpc_url)
+        result = client.send_raw_transaction(bytes(tx))
+        return str(result.value)
+    except Exception as e:
+        log.error("sign_and_send failed: %s", e)
+        return None
+
+
 def live_buy(store, coin_id: int, usd: float, price: float, ts: float,
              rpc_url: str, keypair_path: str, quote_mint: str,
              token_mint: str, gas_reserve_lamports: int,
              token_decimals: int = 6, origin: str = "grid",
-             slippage_bps: int = 150) -> str:
-    """Execute a real buy swap via Jupiter. Returns txsig or '' on failure."""
+             slippage_bps: int = DEFAULT_SLIPPAGE_BPS) -> str:
+    """Execute a real buy swap via Jupiter swap v2. Returns txsig or '' on failure."""
     kp = load_keypair(keypair_path)
     wallet = str(kp.pubkey())
 
-    # Gas check
     lamports = sol_balance_lamports(rpc_url, wallet)
     if lamports is None or lamports < gas_reserve_lamports:
         log.error("Insufficient SOL for gas: %s lamports (need >=%d)", lamports, gas_reserve_lamports)
         return ""
 
-    # Reserve USDC before attempting the swap
     if not store.usdc_reserve(usd, coin_id):
         log.warning("live_buy: insufficient USDC balance for coin=%d usd=%.2f", coin_id, usd)
         return ""
 
-    in_amount = int(usd * 1e6)          # USDC has 6 decimals
+    in_amount = int(usd * 1e6)
 
-    # Quote
-    quote_url = (
-        f"{JUPITER_QUOTE_URL}?inputMint={quote_mint}&outputMint={token_mint}"
-        f"&amount={in_amount}&slippageBps={slippage_bps}"
-    )
-    quote = _get_json(quote_url)
+    quote = _jupiter_quote(quote_mint, token_mint, in_amount, slippage_bps)
     if not quote:
         store.usdc_release(usd, coin_id)
         return ""
@@ -217,35 +304,24 @@ def live_buy(store, coin_id: int, usd: float, price: float, ts: float,
         store.usdc_release(usd, coin_id)
         return ""
 
-    # Build swap tx
-    swap_payload = {
-        "quoteResponse": quote,
-        "userPublicKey": wallet,
-        "wrapAndUnwrapSol": True,
-    }
-    swap_resp = _post_json(JUPITER_SWAP_URL, swap_payload)
+    swap_resp = _jupiter_swap(quote, wallet)
     if not swap_resp or "swapTransaction" not in swap_resp:
         log.warning("live_buy: no swapTransaction in response")
         store.usdc_release(usd, coin_id)
         return ""
 
-    if not order_avoids_foreign_signer(swap_resp, wallet):
+    swap_tx = swap_resp["swapTransaction"]
+    if not tx_avoids_foreign_signer(swap_tx, wallet):
         store.usdc_release(usd, coin_id)
         return ""
 
-    # Sign and send
-    try:
-        from solders.transaction import VersionedTransaction  # type: ignore
-        from solana.rpc.api import Client                      # type: ignore
+    txsig = _sign_and_send(swap_tx, kp, rpc_url)
+    if not txsig:
+        store.usdc_release(usd, coin_id)
+        return ""
 
-        raw = base64.b64decode(swap_resp["swapTransaction"])
-        tx = VersionedTransaction.from_bytes(raw)
-        tx.sign([kp])
-        client = Client(rpc_url)
-        result = client.send_raw_transaction(bytes(tx))
-        txsig = str(result.value)
-    except Exception as e:
-        log.error("live_buy: send failed: %s", e)
+    if not confirm_transaction(rpc_url, txsig):
+        log.error("live_buy: tx %s NOT confirmed — releasing reservation", txsig)
         store.usdc_release(usd, coin_id)
         return ""
 
@@ -261,8 +337,8 @@ def live_sell(store, coin_id: int, lot: dict, price: float,
               rpc_url: str, keypair_path: str, quote_mint: str,
               token_mint: str, gas_reserve_lamports: int,
               token_decimals: int = 6,
-              slippage_bps: int = 150) -> str:
-    """Execute a real sell swap via Jupiter. Returns txsig or '' on failure."""
+              slippage_bps: int = DEFAULT_SLIPPAGE_BPS) -> str:
+    """Execute a real sell swap via Jupiter swap v2. Returns txsig or '' on failure."""
     if not revalidate_effective_sale(lot, price):
         log.warning("live_sell: hard rule blocks lot=%d at price=%.6f", lot["id"], price)
         return ""
@@ -278,11 +354,7 @@ def live_sell(store, coin_id: int, lot: dict, price: float,
     tokens = lot["tokens"]
     in_amount = int(tokens * 10 ** token_decimals)
 
-    quote_url = (
-        f"{JUPITER_QUOTE_URL}?inputMint={token_mint}&outputMint={quote_mint}"
-        f"&amount={in_amount}&slippageBps={slippage_bps}"
-    )
-    quote = _get_json(quote_url)
+    quote = _jupiter_quote(token_mint, quote_mint, in_amount, slippage_bps)
     if not quote:
         return ""
 
@@ -290,36 +362,24 @@ def live_sell(store, coin_id: int, lot: dict, price: float,
     if eff_price is None or eff_price <= 0:
         return ""
 
-    # Revalidate at worst fill
-    test_lot = dict(lot, buy_price=lot["buy_price"])
-    if not revalidate_effective_sale(test_lot, eff_price):
+    if not revalidate_effective_sale(lot, eff_price):
         log.warning("live_sell: worst-fill quote below cost for lot=%d", lot["id"])
         return ""
 
-    swap_payload = {
-        "quoteResponse": quote,
-        "userPublicKey": wallet,
-        "wrapAndUnwrapSol": True,
-    }
-    swap_resp = _post_json(JUPITER_SWAP_URL, swap_payload)
+    swap_resp = _jupiter_swap(quote, wallet)
     if not swap_resp or "swapTransaction" not in swap_resp:
         return ""
 
-    if not order_avoids_foreign_signer(swap_resp, wallet):
+    swap_tx = swap_resp["swapTransaction"]
+    if not tx_avoids_foreign_signer(swap_tx, wallet):
         return ""
 
-    try:
-        from solders.transaction import VersionedTransaction  # type: ignore
-        from solana.rpc.api import Client                      # type: ignore
+    txsig = _sign_and_send(swap_tx, kp, rpc_url)
+    if not txsig:
+        return ""
 
-        raw = base64.b64decode(swap_resp["swapTransaction"])
-        tx = VersionedTransaction.from_bytes(raw)
-        tx.sign([kp])
-        client = Client(rpc_url)
-        result = client.send_raw_transaction(bytes(tx))
-        txsig = str(result.value)
-    except Exception as e:
-        log.error("live_sell: send failed: %s", e)
+    if not confirm_transaction(rpc_url, txsig):
+        log.error("live_sell: tx %s NOT confirmed — lot stays in book", txsig)
         return ""
 
     proceeds = int(quote.get("outAmount", 0)) / 1e6
@@ -337,47 +397,33 @@ SOL_MINT = "So11111111111111111111111111111111111111112"
 
 
 def gas_refill(store, refill_usdc: float, rpc_url: str, keypair_path: str,
-               quote_mint: str, slippage_bps: int = 300) -> str:
+               quote_mint: str, slippage_bps: int = GAS_REFILL_SLIPPAGE_BPS) -> str:
     """Swap USDC -> SOL to refill gas. LIVE only. Returns txsig or ''."""
     kp = load_keypair(keypair_path)
     wallet = str(kp.pubkey())
 
     in_amount = int(refill_usdc * 1e6)
 
-    quote_url = (
-        f"{JUPITER_QUOTE_URL}?inputMint={quote_mint}&outputMint={SOL_MINT}"
-        f"&amount={in_amount}&slippageBps={slippage_bps}"
-    )
-    quote = _get_json(quote_url)
+    quote = _jupiter_quote(quote_mint, SOL_MINT, in_amount, slippage_bps)
     if not quote:
         log.warning("gas_refill: quote failed")
         return ""
 
-    swap_payload = {
-        "quoteResponse": quote,
-        "userPublicKey": wallet,
-        "wrapAndUnwrapSol": True,
-    }
-    swap_resp = _post_json(JUPITER_SWAP_URL, swap_payload)
+    swap_resp = _jupiter_swap(quote, wallet)
     if not swap_resp or "swapTransaction" not in swap_resp:
         log.warning("gas_refill: no swapTransaction")
         return ""
 
-    if not order_avoids_foreign_signer(swap_resp, wallet):
+    swap_tx = swap_resp["swapTransaction"]
+    if not tx_avoids_foreign_signer(swap_tx, wallet):
         return ""
 
-    try:
-        from solders.transaction import VersionedTransaction  # type: ignore
-        from solana.rpc.api import Client  # type: ignore
+    txsig = _sign_and_send(swap_tx, kp, rpc_url)
+    if not txsig:
+        return ""
 
-        raw = base64.b64decode(swap_resp["swapTransaction"])
-        tx = VersionedTransaction.from_bytes(raw)
-        tx.sign([kp])
-        client = Client(rpc_url)
-        result = client.send_raw_transaction(bytes(tx))
-        txsig = str(result.value)
-    except Exception as e:
-        log.error("gas_refill: send failed: %s", e)
+    if not confirm_transaction(rpc_url, txsig):
+        log.error("gas_refill: tx %s NOT confirmed — no debit", txsig)
         return ""
 
     store.usdc_deposit(-refill_usdc)
