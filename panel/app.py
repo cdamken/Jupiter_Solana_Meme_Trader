@@ -23,12 +23,24 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+import functools
+import hashlib
+import hmac
+
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify
 
 import config as cfg
 from store.store import Store
 
 PANEL_BASE = os.environ.get("PANEL_BASE", "")   # e.g. "/carlos/jupiter/" when behind PHP proxy
+PANEL_SECRET = os.environ.get("PANEL_SECRET", "")
+
+# Fail-closed: refuse to boot with no secret or the placeholder default
+if not PANEL_SECRET or PANEL_SECRET == "change-me-in-production":
+    print("FATAL: PANEL_SECRET must be set to a real secret (not the default).", file=sys.stderr)
+    print("  export PANEL_SECRET=$(python3 -c 'import secrets; print(secrets.token_hex(32))')",
+          file=sys.stderr)
+    sys.exit(1)
 
 app = Flask(__name__, template_folder="templates")
 
@@ -47,7 +59,24 @@ if PANEL_BASE:
             return self.app(environ, start_response)
 
     app.wsgi_app = _ScriptNameMiddleware(app.wsgi_app, _script_name)
-app.secret_key = os.environ.get("PANEL_SECRET", "change-me-in-production")
+app.secret_key = PANEL_SECRET
+
+
+# ---- auth: token gate for all mutations ----
+
+def _token_ok() -> bool:
+    token = request.form.get("_token") or request.headers.get("X-Panel-Token", "")
+    return hmac.compare_digest(token, PANEL_SECRET)
+
+
+def require_token(fn):
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not _token_ok():
+            flash("Authentication required (invalid or missing token)", "error")
+            return redirect(request.referrer or url_for("dashboard")), 403
+        return fn(*args, **kwargs)
+    return wrapper
 
 import datetime as _dt
 
@@ -157,6 +186,7 @@ def coin_detail(coin_id: int):
 
 
 @app.post("/coin/add")
+@require_token
 def coin_add():
     slug  = request.form.get("slug", "").strip().lower()
     label = request.form.get("label", "").strip()
@@ -177,19 +207,73 @@ def coin_add():
     return redirect(url_for("dashboard"))
 
 
+def _audit_live_config(store: Store, coin_id: int, slug: str) -> list[str]:
+    """Run the static money audit before allowing paper->live. Returns a list of failures."""
+    failures = []
+    cfg_map = store.get_config(coin_id)
+
+    money_keys = ["LOT_USD", "MAX_CAPITAL_USD", "BUY_STEP_PCT", "SELL_STEP_PCT",
+                  "MAX_SLIPPAGE_BPS", "MAX_TRADE_USD"]
+    for k in money_keys:
+        if k not in cfg_map:
+            failures.append(f"Missing money-critical key: {k}")
+
+    lot_usd = float(cfg_map.get("LOT_USD", 0))
+    if lot_usd <= 0:
+        failures.append(f"LOT_USD must be > 0 (got {lot_usd})")
+
+    max_cap = float(cfg_map.get("MAX_CAPITAL_USD", 0))
+    if max_cap <= 0:
+        failures.append(f"MAX_CAPITAL_USD must be > 0 (got {max_cap})")
+
+    slippage = float(cfg_map.get("MAX_SLIPPAGE_BPS", 0))
+    if slippage <= 0 or slippage > 500:
+        failures.append(f"MAX_SLIPPAGE_BPS must be 1-500 (got {slippage})")
+
+    if not cfg.ALERT_EMAIL:
+        failures.append("ALERT_EMAIL not set in environment")
+
+    if not os.path.exists(cfg.KEYPAIR_PATH):
+        failures.append(f"KEYPAIR_PATH not found: {cfg.KEYPAIR_PATH}")
+
+    return failures
+
+
 @app.post("/coin/<int:coin_id>/status")
+@require_token
 def coin_status(coin_id: int):
     status = request.form.get("status", "")
     if status not in ("paper", "live", "paused"):
         flash("Invalid status", "error")
         return redirect(url_for("coin_detail", coin_id=coin_id))
+
     store = _store()
+    coin = store._c.execute("SELECT * FROM coins WHERE id = ?", (coin_id,)).fetchone()
+    if not coin:
+        flash("Coin not found", "error")
+        return redirect(url_for("dashboard"))
+
+    # Gate: paper->live requires audit + slug confirmation
+    if status == "live" and coin["status"] != "live":
+        confirm_slug = request.form.get("confirm_slug", "").strip().lower()
+        if confirm_slug != coin["slug"]:
+            flash(f"To go live, type the slug '{coin['slug']}' to confirm", "error")
+            return redirect(url_for("coin_detail", coin_id=coin_id))
+
+        failures = _audit_live_config(store, coin_id, coin["slug"])
+        if failures:
+            for f in failures:
+                flash(f"Audit FAIL: {f}", "error")
+            flash("Cannot go live — fix the audit failures above", "error")
+            return redirect(url_for("coin_detail", coin_id=coin_id))
+
     store.set_coin_status(coin_id, status)
     flash(f"Status set to '{status}'", "ok")
     return redirect(url_for("coin_detail", coin_id=coin_id))
 
 
 @app.post("/coin/<int:coin_id>/config")
+@require_token
 def coin_config_save(coin_id: int):
     key    = request.form.get("key", "").strip()
     value  = request.form.get("value", "").strip()
@@ -218,6 +302,7 @@ def coin_config_save(coin_id: int):
 
 
 @app.post("/coin/<int:coin_id>/config/delete")
+@require_token
 def coin_config_delete(coin_id: int):
     key = request.form.get("key", "").strip()
     store = _store()
@@ -365,6 +450,7 @@ def money():
 
 
 @app.post("/withdraw")
+@require_token
 def withdraw():
     try:
         amount = float(request.form.get("amount", "0"))
@@ -388,6 +474,7 @@ def withdraw():
 
 
 @app.post("/deposit")
+@require_token
 def deposit():
     try:
         amount = float(request.form.get("amount", "0"))
@@ -405,7 +492,7 @@ def deposit():
 
 @app.context_processor
 def _inject_base():
-    return {"panel_base": PANEL_BASE}
+    return {"panel_base": PANEL_BASE, "panel_token": PANEL_SECRET}
 
 
 if __name__ == "__main__":
