@@ -79,11 +79,23 @@ def require_token(fn):
     return wrapper
 
 import datetime as _dt
+from zoneinfo import ZoneInfo
+
+_TZ = ZoneInfo("Europe/Berlin")
 
 @app.template_filter("datefmt")
 def _datefmt(ts):
     try:
-        return _dt.datetime.utcfromtimestamp(float(ts)).strftime("%m-%d")
+        dt = _dt.datetime.fromtimestamp(float(ts), tz=_TZ)
+        return dt.strftime("%d.%m %H:%M")
+    except Exception:
+        return ""
+
+@app.template_filter("datefmt_short")
+def _datefmt_short(ts):
+    try:
+        dt = _dt.datetime.fromtimestamp(float(ts), tz=_TZ)
+        return dt.strftime("%d.%m")
     except Exception:
         return ""
 
@@ -96,16 +108,11 @@ def _store() -> Store:
 def _coin_summary(store: Store, coin: dict) -> dict:
     lots = store.get_lots(coin["id"])
     deployed = sum(lot["cost"] for lot in lots)
-    unrealized = 0.0          # we don't fetch live price here; show 0 as placeholder
-    trade_rows = store._c.execute(
-        "SELECT side, usd, pnl_pct FROM trades WHERE coin_id = ? ORDER BY ts DESC LIMIT 20",
-        (coin["id"],),
-    ).fetchall()
-    realized = sum(
-        row["usd"] - row["usd"] / (1 + row["pnl_pct"] / 100.0)
-        for row in trade_rows
-        if row["side"] == "sell" and row["pnl_pct"] is not None
-    )
+    total_tokens = sum(lot["tokens"] for lot in lots)
+    realized = store.realized_pnl(coin["id"])
+    price, price_ts = store.latest_price_ts(coin["id"])
+    position_value = total_tokens * price if price else 0.0
+    unrealized = position_value - deployed
     return {
         "id":         coin["id"],
         "slug":       coin["slug"],
@@ -115,6 +122,11 @@ def _coin_summary(store: Store, coin: dict) -> dict:
         "lots":       len(lots),
         "deployed":   round(deployed, 2),
         "realized":   round(realized, 2),
+        "unrealized": round(unrealized, 2),
+        "price":      price,
+        "price_ts":   price_ts,
+        "position":   round(position_value, 2),
+        "tokens":     total_tokens,
     }
 
 
@@ -132,19 +144,8 @@ def dashboard():
     summaries = [_coin_summary(store, dict(c)) for c in coins]
     balance = store.usdc_balance()
 
-    # Fleet-wide recent trades (last 100, all coins)
-    fleet_trades = store._c.execute(
-        "SELECT t.ts, c.id AS coin_id, c.slug, c.label, t.mode, t.side,"
-        " t.price, t.tokens, t.usd, t.pnl_pct, t.txsig"
-        " FROM trades t JOIN coins c ON c.id = t.coin_id"
-        " ORDER BY t.ts DESC LIMIT 100"
-    ).fetchall()
-
-    # Total deposits (sum of all 'deposit' ledger entries)
-    dep_row = store._c.execute(
-        "SELECT COALESCE(SUM(delta), 0) AS total FROM usdc_ledger WHERE kind = 'deposit'"
-    ).fetchone()
-    total_deposited = round(dep_row["total"], 2) if dep_row else 0.0
+    fleet_trades = store.fleet_trades(100)
+    total_deposited = round(store.total_deposited(), 2)
 
     return render_template(
         "dashboard.html",
@@ -158,30 +159,30 @@ def dashboard():
 @app.get("/coin/<int:coin_id>")
 def coin_detail(coin_id: int):
     store = _store()
-    coin = store._c.execute("SELECT * FROM coins WHERE id = ?", (coin_id,)).fetchone()
-    if not coin:
+    coin_row = store._c.execute("SELECT * FROM coins WHERE id = ?", (coin_id,)).fetchone()
+    if not coin_row:
         flash("Coin not found", "error")
         return redirect(url_for("dashboard"))
+    coin = dict(coin_row)
     lots = [dict(r) for r in store.get_lots(coin_id)]
     cfg_map = store.get_config(coin_id)
-    overrides = store._c.execute(
-        "SELECT key, value, author, reason, ts FROM coin_overrides WHERE coin_id = ? ORDER BY key",
-        (coin_id,),
-    ).fetchall()
-    catalog = store._c.execute(
-        "SELECT key, tier, scope, type, label, help, default_val, min, max FROM param_catalog ORDER BY key",
-    ).fetchall()
-    trades = store._c.execute(
-        "SELECT ts, mode, side, signal, price, tokens, usd, pnl_pct, txsig"
-        " FROM trades WHERE coin_id = ? ORDER BY ts DESC LIMIT 50",
-        (coin_id,),
-    ).fetchall()
+    overrides = [dict(r) for r in store.coin_overrides_list(coin_id)]
+    catalog = [dict(r) for r in store.param_catalog_list()]
+    trades = [dict(r) for r in store.coin_trades(coin_id)]
+    price, price_ts = store.latest_price_ts(coin_id)
+    realized = store.realized_pnl(coin_id)
+    deployed = sum(l["cost"] for l in lots)
+    total_tokens = sum(l["tokens"] for l in lots)
+    position = total_tokens * price if price else 0.0
     return render_template(
         "coin.html",
-        coin=dict(coin), lots=lots, cfg=cfg_map,
-        overrides=[dict(r) for r in overrides],
-        catalog=[dict(r) for r in catalog],
-        trades=[dict(r) for r in trades],
+        coin=coin, lots=lots, cfg=cfg_map,
+        overrides=overrides, catalog=catalog, trades=trades,
+        price=price, price_ts=price_ts,
+        realized=round(realized, 2),
+        deployed=round(deployed, 2),
+        position=round(position, 2),
+        unrealized=round(position - deployed, 2),
     )
 
 
@@ -362,10 +363,7 @@ def overview():
             ]
 
     balance = store.usdc_balance()
-    dep_row = store._c.execute(
-        "SELECT COALESCE(SUM(delta), 0) AS total FROM usdc_ledger WHERE kind = 'deposit'"
-    ).fetchone()
-    total_deposited = round(dep_row["total"], 2) if dep_row else 0.0
+    total_deposited = round(store.total_deposited(), 2)
 
     return render_template(
         "overview.html",
@@ -383,10 +381,7 @@ def overview():
 @app.get("/glossary")
 def glossary():
     store = _store()
-    catalog = store._c.execute(
-        "SELECT key, tier, scope, type, label, help, default_val, recommended, min, max"
-        " FROM param_catalog ORDER BY scope, key"
-    ).fetchall()
+    catalog = store.param_catalog_list()
 
     # Fleet defaults (pinned version)
     pinned = store._c.execute(
@@ -426,26 +421,27 @@ def glossary():
 @app.get("/money")
 def money():
     store = _store()
-    rows = store._c.execute(
-        "SELECT id, ts, kind, delta, coin_id, txsig FROM usdc_ledger"
-        " WHERE kind IN ('deposit', 'withdraw')"
-        " ORDER BY ts DESC LIMIT 200"
-    ).fetchall()
+    rows = store.deposit_withdraw_history()
     balance = store.usdc_balance()
-    dep_row = store._c.execute(
-        "SELECT COALESCE(SUM(delta), 0) AS total FROM usdc_ledger WHERE kind = 'deposit'"
-    ).fetchone()
-    total_deposited = round(dep_row["total"], 2) if dep_row else 0.0
-    with_row = store._c.execute(
-        "SELECT COALESCE(SUM(ABS(delta)), 0) AS total FROM usdc_ledger WHERE kind = 'withdraw'"
-    ).fetchone()
-    total_withdrawn = round(with_row["total"], 2) if with_row else 0.0
+    total_dep = round(store.total_deposited(), 2)
+    total_with = round(store.total_withdrawn(), 2)
+    # Real vs invested: current portfolio value minus total deposits
+    coins = store.list_coins()
+    portfolio_value = balance
+    for c in coins:
+        lots = store.get_lots(c["id"])
+        price = store.latest_price(c["id"])
+        if price and lots:
+            portfolio_value += sum(l["tokens"] for l in lots) * price
+    real_vs_invested = round(portfolio_value - total_dep + total_with, 2)
     return render_template(
         "money.html",
         ledger=[dict(r) for r in rows],
         balance=round(balance, 2),
-        total_deposited=total_deposited,
-        total_withdrawn=total_withdrawn,
+        total_deposited=total_dep,
+        total_withdrawn=total_with,
+        portfolio_value=round(portfolio_value, 2),
+        real_vs_invested=real_vs_invested,
     )
 
 

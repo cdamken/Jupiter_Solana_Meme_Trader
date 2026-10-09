@@ -271,6 +271,79 @@ class Store:
         self._c.execute("DELETE FROM decisions WHERE ts < ?", (cutoff,))
         self._auto_commit()
 
+    # ---- panel quality helpers ----
+
+    def latest_price(self, coin_id: int) -> float | None:
+        row = self._c.execute(
+            "SELECT price FROM price_history WHERE coin_id = ? ORDER BY ts DESC LIMIT 1",
+            (coin_id,),
+        ).fetchone()
+        return row["price"] if row else None
+
+    def latest_price_ts(self, coin_id: int) -> tuple[float | None, float | None]:
+        row = self._c.execute(
+            "SELECT price, ts FROM price_history WHERE coin_id = ? ORDER BY ts DESC LIMIT 1",
+            (coin_id,),
+        ).fetchone()
+        return (row["price"], row["ts"]) if row else (None, None)
+
+    def realized_pnl(self, coin_id: int) -> float:
+        row = self._c.execute(
+            "SELECT COALESCE(SUM(usd - usd / (1 + pnl_pct / 100.0)), 0) AS total"
+            " FROM trades WHERE coin_id = ? AND side = 'sell' AND pnl_pct IS NOT NULL",
+            (coin_id,),
+        ).fetchone()
+        return row["total"] if row else 0.0
+
+    def fleet_trades(self, limit: int = 100) -> list[sqlite3.Row]:
+        return self._c.execute(
+            "SELECT t.ts, c.id AS coin_id, c.slug, c.label, t.mode, t.side,"
+            " t.price, t.tokens, t.usd, t.pnl_pct, t.txsig"
+            " FROM trades t JOIN coins c ON c.id = t.coin_id"
+            " ORDER BY t.ts DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+
+    def total_deposited(self) -> float:
+        row = self._c.execute(
+            "SELECT COALESCE(SUM(delta), 0) AS total FROM usdc_ledger WHERE kind = 'deposit'"
+        ).fetchone()
+        return row["total"] if row else 0.0
+
+    def total_withdrawn(self) -> float:
+        row = self._c.execute(
+            "SELECT COALESCE(SUM(ABS(delta)), 0) AS total FROM usdc_ledger WHERE kind = 'withdraw'"
+        ).fetchone()
+        return row["total"] if row else 0.0
+
+    def coin_trades(self, coin_id: int, limit: int = 50) -> list[sqlite3.Row]:
+        return self._c.execute(
+            "SELECT ts, mode, side, signal, price, tokens, usd, pnl_pct, txsig"
+            " FROM trades WHERE coin_id = ? ORDER BY ts DESC LIMIT ?",
+            (coin_id, limit),
+        ).fetchall()
+
+    def coin_overrides_list(self, coin_id: int) -> list[sqlite3.Row]:
+        return self._c.execute(
+            "SELECT key, value, author, reason, ts FROM coin_overrides"
+            " WHERE coin_id = ? ORDER BY key",
+            (coin_id,),
+        ).fetchall()
+
+    def param_catalog_list(self) -> list[sqlite3.Row]:
+        return self._c.execute(
+            "SELECT key, tier, scope, type, label, help, default_val, recommended, min, max"
+            " FROM param_catalog ORDER BY scope, key"
+        ).fetchall()
+
+    def deposit_withdraw_history(self, limit: int = 200) -> list[sqlite3.Row]:
+        return self._c.execute(
+            "SELECT id, ts, kind, delta, coin_id, txsig FROM usdc_ledger"
+            " WHERE kind IN ('deposit', 'withdraw')"
+            " ORDER BY ts DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+
     # ---- capital ----
 
     def fleet_deployed_usd(self) -> float:
