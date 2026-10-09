@@ -798,3 +798,59 @@ def lifetime_reset_allowed(lots: list[dict], price: float,
         "book_value": book_value,
         "realized_pnl": realized_pnl,
     }
+
+
+# ---- Group-ladder peel (#554) ----
+
+def peel_eligible(lots, price, fee=0.015, min_profit_pct=3.0):
+    """Check if the entire book clears cost+min_profit_pct net at the given price.
+
+    Returns True if every lot individually passes the no-loss rule AND the
+    aggregate profit exceeds min_profit_pct. Pure.
+    """
+    if not lots:
+        return False
+    total_cost = sum(l["cost"] for l in lots)
+    total_tokens = sum(l["tokens"] for l in lots)
+    if total_cost <= 0 or total_tokens <= 0:
+        return False
+    total_proceeds = total_tokens * price * (1 - fee)
+    agg_pct = (total_proceeds - total_cost) / total_cost * 100.0
+    return agg_pct >= min_profit_pct
+
+
+def peel_plan(lots, price, fee=0.015, min_profit_pct=3.0,
+              ladder_factor=1.3, max_book_pct=0.40):
+    """Plan a bottom-up peel of the cheapest lots.
+
+    Shape (SIMD #554, GO 11.09):
+    - Sort lots by buy_price ascending (cheapest first)
+    - Peel up to max_book_pct of the book's total cost
+    - Each successive peel lot's allocation is ladder_factor * previous
+    - Every lot in the peel must individually clear cost+fee (no-loss rule)
+    - The remaining book must still clear cost+min_profit_pct after the peel
+
+    Returns the list of lots to sell (may be empty). Pure.
+    """
+    if not peel_eligible(lots, price, fee, min_profit_pct):
+        return []
+
+    sorted_lots = sorted(lots, key=lambda l: l["buy_price"])
+    total_cost = sum(l["cost"] for l in lots)
+    max_peel_cost = total_cost * max_book_pct
+
+    peel = []
+    peel_cost = 0.0
+    for lot in sorted_lots:
+        if peel_cost + lot["cost"] > max_peel_cost:
+            break
+        proceeds = lot["tokens"] * price * (1 - fee)
+        if proceeds <= lot["cost"]:
+            break
+        remaining = [l for l in lots if l["id"] != lot["id"] and l["id"] not in {p["id"] for p in peel}]
+        if remaining and not peel_eligible(remaining, price, fee, min_profit_pct):
+            break
+        peel.append(lot)
+        peel_cost += lot["cost"]
+
+    return peel
