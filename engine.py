@@ -689,6 +689,18 @@ def price_gate(price: float, last: float, max_step_pct: float,
     return None, price, 1
 
 
+# ---- Concentration cap (#1021) ----
+
+def apply_capital_pct_cap(cap_usd, fleet_total, pct):
+    """Tighten a per-coin USD cap to a share of the fleet total. pct<=0 = OFF.
+    The concentration ceiling = pct% of fleet_total; returns min(cap_usd, ceiling).
+    A concentration cap can only lower the per-coin budget, never raise it. PURE."""
+    if not pct or pct <= 0:
+        return cap_usd
+    ceiling = fleet_total * pct / 100.0
+    return ceiling if cap_usd is None else min(cap_usd, ceiling)
+
+
 # ---- Batch-sale planners (#968) ----
 
 def cap_batch_plan(plan_lots, price, max_trade_usd, max_lots):
