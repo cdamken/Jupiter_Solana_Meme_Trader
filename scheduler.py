@@ -134,8 +134,9 @@ def tick_coin(store: Store, coin: dict, force_mode: str | None = None):
     ceil_pct      = _cfg_float(cfg, "CEILING_PERCENTILE", 98.0)
     max_step_pct  = _cfg_float(cfg, "PRICE_GATE_PCT",  30.0)
 
-    # Fetch price
-    price = fetch_price(mint)
+    # Fetch price (liquidity pick + optional pair pinning, #1030)
+    pair_address = cfg.get("PRICE_PAIR_ADDRESS", "").strip() or None
+    price = fetch_price(mint, pair_address=pair_address)
     if price is None:
         streak = _no_price_streak.get(coin_id, 0) + 1
         _no_price_streak[coin_id] = streak

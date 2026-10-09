@@ -20,11 +20,12 @@ import time
 import urllib.request
 import urllib.error
 
+import price_feed as pf
+
 log = logging.getLogger(__name__)
 
 JUPITER_QUOTE_URL = "https://quote-api.jup.ag/v6/quote"
 JUPITER_SWAP_URL  = "https://quote-api.jup.ag/v6/swap"
-DEXSCREENER_URL   = "https://api.dexscreener.com/latest/dex/tokens/{mint}"
 
 _UA = "Mozilla/5.0 (compatible; JupiterTrader/1.0)"
 
@@ -68,21 +69,17 @@ def _post_json(url: str, payload: dict) -> dict | None:
 
 # ---- Price feed ----
 
-def fetch_price(mint: str) -> float | None:
-    """Fetch price in USD from DexScreener. Returns None on bad feed."""
-    data = _get_json(DEXSCREENER_URL.format(mint=mint))
+def fetch_price(mint: str, pair_address: str | None = None) -> float | None:
+    """Fetch price in USD from DexScreener via price_feed module.
+
+    Uses liquidity-weighted pair selection (#283/#288) and optional pair pinning
+    (#1030/#1031). Returns None on bad feed (fail-closed).
+    """
+    url = pf.dex_endpoint(mint, pair_address)
+    data = _get_json(url)
     if not data:
         return None
-    pairs = data.get("pairs") or []
-    if not pairs:
-        return None
-    try:
-        price = float(pairs[0].get("priceUsd", 0))
-    except (TypeError, ValueError):
-        return None
-    if price <= 0:
-        return None         # hard rule: 0/NaN is not a price
-    return price
+    return pf.price_usd(data, mint, pair_address)
 
 
 # ---- Keypair ----
