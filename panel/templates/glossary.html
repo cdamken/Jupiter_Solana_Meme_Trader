@@ -40,13 +40,13 @@ const COINS  = {{ coins          | tojson }};
   padding: 8px 10px;
   cursor: pointer;
   text-align: left;
-  color: var(--text, #e6edf3);
+  color: var(--text);
   font-size: 0.88em;
   transition: background 0.15s;
   margin-bottom: 2px;
 }
-.coin-btn:hover   { background: rgba(255,255,255,0.06); }
-.coin-btn.active  { background: rgba(88,166,255,0.18); color: #58a6ff; }
+.coin-btn:hover   { background: rgba(0,29,59,0.06); }
+.coin-btn.active  { background: rgba(0,29,59,0.1); color: var(--primary); font-weight: 600; }
 .coin-badge {
   font-size: 0.68em;
   padding: 1px 5px;
@@ -70,13 +70,13 @@ const COINS  = {{ coins          | tojson }};
   margin-top: 14px;
 }
 .intro-box {
-  background: rgba(255,255,255,0.04);
-  border: 1px solid rgba(255,255,255,0.08);
+  background: var(--bg, #eef3f8);
+  border: 1px solid var(--line, #d7dfe8);
   border-radius: 8px;
   padding: 14px 16px;
 }
-.intro-box strong { display: block; margin-bottom: 4px; font-size: 0.95em; }
-.intro-box p { margin: 0; font-size: 0.84em; line-height: 1.55; color: rgba(200,210,220,0.7); }
+.intro-box strong { display: block; margin-bottom: 4px; font-size: 0.95em; color: var(--text); }
+.intro-box p { margin: 0; font-size: 0.84em; line-height: 1.55; color: var(--text); }
 
 /* parameter section */
 .scope-section { margin-bottom: 16px; }
@@ -84,14 +84,14 @@ const COINS  = {{ coins          | tojson }};
   font-size: 0.72em;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: rgba(200,210,220,0.45);
+  color: var(--mut);
   margin: 0 0 10px;
   padding-bottom: 8px;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
+  border-bottom: 1px solid var(--line);
 }
 .param-row {
   padding: 16px 0;
-  border-bottom: 1px solid rgba(255,255,255,0.05);
+  border-bottom: 1px solid var(--line);
 }
 .param-row:last-child { border-bottom: none; padding-bottom: 4px; }
 .param-headline {
@@ -101,22 +101,22 @@ const COINS  = {{ coins          | tojson }};
   gap: 8px;
   margin-bottom: 7px;
 }
-.param-label   { font-size: 1em; font-weight: 600; }
+.param-label   { font-size: 1em; font-weight: 600; color: var(--text); }
 .param-key     {
   font-size: 0.78em;
   font-family: monospace;
-  background: rgba(255,255,255,0.08);
+  background: rgba(0,29,59,0.07);
   padding: 1px 7px;
   border-radius: 4px;
-  color: #a5d6ff;
+  color: var(--primary);
 }
-.param-meta    { font-size: 0.76em; color: rgba(200,210,220,0.5); }
-.param-rec     { font-size: 0.76em; color: #58a6ff; }
+.param-meta    { font-size: 0.76em; color: var(--mut); }
+.param-rec     { font-size: 0.76em; color: #0066cc; }
 .param-help    {
   margin: 0;
   font-size: 0.86em;
   line-height: 1.65;
-  color: rgba(200,210,220,0.68);
+  color: var(--text);
   max-width: 680px;
 }
 
@@ -207,8 +207,8 @@ const COINS  = {{ coins          | tojson }};
     {# intro card #}
     <div class="card" style="margin-bottom:16px;">
       <h2 style="margin-top:0; margin-bottom:6px;">How the bot trades</h2>
-      <p style="margin:0 0 14px; font-size:0.9em; line-height:1.6; color:rgba(200,210,220,0.75);">
-        Buy dips in fixed lots, sell each lot above its own cost — never on an average, never at a loss.
+      <p style="margin:0 0 14px; font-size:0.9em; line-height:1.6; color:var(--mut);">
+        Buy dips in fixed lots, sell each lot above its own cost -- never on an average, never at a loss.
         Every parameter below adjusts one piece of that loop.
       </p>
       <div class="intro-grid">
