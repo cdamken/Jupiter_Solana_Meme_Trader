@@ -144,28 +144,8 @@
 <div style="display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:20px;">
   <div class="card">
     <div class="head"><h2>Add coin</h2></div>
-    <form action="{{ url_for('coin_add') }}" method="post">
-      <div style="display:grid; gap:10px;">
-        <div style="display:flex; gap:10px; align-items:center;">
-          <label class="mut" style="font-size:13px; min-width:60px;">Slug</label>
-          <input type="text" name="slug" placeholder="simd" style="flex:1">
-        </div>
-        <div style="display:flex; gap:10px; align-items:center;">
-          <label class="mut" style="font-size:13px; min-width:60px;">Label</label>
-          <input type="text" name="label" placeholder="SIMD" style="flex:1">
-        </div>
-        <div style="display:flex; gap:10px; align-items:center;">
-          <label class="mut" style="font-size:13px; min-width:60px;">Mint</label>
-          <input type="text" name="mint" placeholder="SiMDt..." style="flex:1">
-        </div>
-        <div style="display:flex; gap:10px; align-items:center;">
-          <label class="mut" style="font-size:13px; min-width:60px;">Decimals</label>
-          <input type="number" name="decimals" value="6" min="0" max="18" style="width:80px">
-          <span class="mut" style="font-size:12px;">(6 = pump.fun, 9 = SOL)</span>
-        </div>
-        <div><button type="submit" class="btn btn-accent">Add (paper)</button></div>
-      </div>
-    </form>
+    <p style="margin:0 0 14px; font-size:14px;" class="mut">Full provisioning wizard: validates the mint, fetches token info, lets you pick a pair and set starting parameters.</p>
+    <a href="{{ url_for('coin_wizard') }}" class="btn btn-accent">Launch wizard</a>
   </div>
 
   <div class="card">

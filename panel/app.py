@@ -186,26 +186,124 @@ def coin_detail(coin_id: int):
     )
 
 
+@app.get("/coin/wizard")
+def coin_wizard():
+    store = _store()
+    fleet_cfg = store.get_config(0)
+    lot_usd = fleet_cfg.get("LOT_USD", "10")
+    max_capital = fleet_cfg.get("MAX_CAPITAL_USD", "100")
+    return render_template("wizard.html", lot_usd=lot_usd, max_capital=max_capital)
+
+
+@app.get("/api/validate-mint")
+def api_validate_mint():
+    mint = request.args.get("mint", "").strip()
+    if not mint or len(mint) < 32 or len(mint) > 50:
+        return jsonify({"ok": False, "error": "Invalid mint address length"})
+    import re
+    if not re.match(r'^[1-9A-HJ-NP-Za-km-z]+$', mint):
+        return jsonify({"ok": False, "error": "Invalid base58 characters in mint"})
+
+    from execute import _get_json, DEXSCREENER_URL
+    data = _get_json(DEXSCREENER_URL.format(mint=mint))
+    if not data:
+        return jsonify({"ok": False, "error": "DexScreener lookup failed (network error or rate limit)"})
+    pairs = data.get("pairs") or []
+    if not pairs:
+        return jsonify({"ok": False, "error": "No trading pairs found for this mint on DexScreener"})
+
+    token_name = pairs[0].get("baseToken", {}).get("name", "")
+    token_symbol = pairs[0].get("baseToken", {}).get("symbol", "")
+    price = None
+    try:
+        price = float(pairs[0].get("priceUsd", 0))
+        if price <= 0:
+            price = None
+    except (TypeError, ValueError):
+        pass
+
+    ranked = sorted(pairs, key=lambda p: float(p.get("liquidity", {}).get("usd", 0) or 0), reverse=True)
+    pair_list = []
+    for p in ranked[:10]:
+        liq = float(p.get("liquidity", {}).get("usd", 0) or 0)
+        pair_list.append({
+            "address": p.get("pairAddress", ""),
+            "dex": p.get("dexId", ""),
+            "quote": p.get("quoteToken", {}).get("symbol", ""),
+            "liquidity": round(liq, 2),
+            "price": p.get("priceUsd"),
+        })
+
+    return jsonify({
+        "ok": True,
+        "name": token_name,
+        "symbol": token_symbol,
+        "price": price,
+        "pairs": pair_list,
+    })
+
+
 @app.post("/coin/add")
 @require_token
 def coin_add():
     slug  = request.form.get("slug", "").strip().lower()
     label = request.form.get("label", "").strip()
     mint  = request.form.get("mint", "").strip()
+    pair_address = request.form.get("pair_address", "").strip()
     try:
         decimals = int(request.form.get("decimals", "6") or "6")
     except ValueError:
         decimals = 6
+    try:
+        lot_usd = float(request.form.get("lot_usd", "10") or "10")
+    except ValueError:
+        lot_usd = 10.0
+    try:
+        max_capital = float(request.form.get("max_capital", "100") or "100")
+    except ValueError:
+        max_capital = 100.0
     if not slug or not mint:
         flash("slug and mint are required", "error")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("coin_wizard"))
+    import re
+    if not re.match(r'^[a-z][a-z0-9_]{0,19}$', slug):
+        flash("slug must be lowercase alphanumeric, start with letter, max 20 chars", "error")
+        return redirect(url_for("coin_wizard"))
+    if not re.match(r'^[1-9A-HJ-NP-Za-km-z]+$', mint) or len(mint) < 32:
+        flash("Invalid mint address", "error")
+        return redirect(url_for("coin_wizard"))
     store = _store()
+    if store.get_coin(slug):
+        flash(f"Coin '{slug}' already exists", "error")
+        return redirect(url_for("coin_wizard"))
     try:
-        store.add_coin(slug, label or slug.upper(), mint, decimals=decimals)
-        flash(f"Coin '{slug}' added (paper mode, decimals={decimals})", "ok")
+        coin_id = store.add_coin(slug, label or slug.upper(), mint, decimals=decimals)
+        if pair_address:
+            store._c.execute(
+                "INSERT INTO coin_overrides (coin_id, key, value, author, reason)"
+                " VALUES (?,?,?,?,?)",
+                (coin_id, "PRICE_PAIR_ADDRESS", pair_address, "wizard", "pinned at add-coin"),
+            )
+        store._c.execute(
+            "INSERT INTO coin_overrides (coin_id, key, value, author, reason)"
+            " VALUES (?,?,?,?,?)"
+            " ON CONFLICT(coin_id, key) DO UPDATE SET value=excluded.value,"
+            " author=excluded.author, reason=excluded.reason",
+            (coin_id, "LOT_USD", str(lot_usd), "wizard", "probation lot from wizard"),
+        )
+        store._c.execute(
+            "INSERT INTO coin_overrides (coin_id, key, value, author, reason)"
+            " VALUES (?,?,?,?,?)"
+            " ON CONFLICT(coin_id, key) DO UPDATE SET value=excluded.value,"
+            " author=excluded.author, reason=excluded.reason",
+            (coin_id, "MAX_CAPITAL_USD", str(max_capital), "wizard", "set at add-coin"),
+        )
+        store._c.commit()
+        flash(f"Coin '{slug}' added (paper mode, lot=${lot_usd}, cap=${max_capital})", "ok")
+        return redirect(url_for("coin_detail", coin_id=coin_id))
     except Exception as e:
         flash(f"Error: {e}", "error")
-    return redirect(url_for("dashboard"))
+    return redirect(url_for("coin_wizard"))
 
 
 def _audit_live_config(store: Store, coin_id: int, slug: str) -> list[str]:
