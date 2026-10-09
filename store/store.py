@@ -246,6 +246,31 @@ class Store:
             (coin_id, since_ts),
         ).fetchall()
 
+    # ---- decisions ----
+
+    def log_decision(self, coin_id: int, ts: float, action: str,
+                     reason: str, price: float | None = None,
+                     detail: dict | None = None):
+        import json as _json
+        self._c.execute(
+            "INSERT INTO decisions (coin_id, ts, action, reason, price, detail)"
+            " VALUES (?,?,?,?,?,?)",
+            (coin_id, ts, action, reason, price,
+             _json.dumps(detail) if detail else None),
+        )
+
+    def get_decisions(self, coin_id: int, limit: int = 50) -> list[sqlite3.Row]:
+        return self._c.execute(
+            "SELECT * FROM decisions WHERE coin_id = ? ORDER BY ts DESC LIMIT ?",
+            (coin_id, limit),
+        ).fetchall()
+
+    def prune_decisions(self, max_age_days: int = 30):
+        import time
+        cutoff = time.time() - max_age_days * 86400
+        self._c.execute("DELETE FROM decisions WHERE ts < ?", (cutoff,))
+        self._auto_commit()
+
     # ---- capital ----
 
     def fleet_deployed_usd(self) -> float:

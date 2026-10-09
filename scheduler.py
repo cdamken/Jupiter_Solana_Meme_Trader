@@ -147,6 +147,9 @@ def tick_coin(store: Store, coin: dict, force_mode: str | None = None):
         _no_price_streak[coin_id] = streak
         log.warning("coin=%d slug=%s: no price (streak=%d)", coin_id, coin["slug"], streak)
         _alerts.alert_no_price(coin["slug"], streak, **_smtp())
+        store.log_decision(coin_id, ts, "skip", "no_price", None,
+                           {"streak": streak})
+        store._auto_commit()
         return
     _no_price_streak[coin_id] = 0
 
@@ -164,6 +167,9 @@ def tick_coin(store: Store, coin: dict, force_mode: str | None = None):
         })
         log.warning("coin=%d slug=%s: price %.8f rejected by gate (last=%.8f)",
                     coin_id, coin["slug"], price, gate_last)
+        store.log_decision(coin_id, ts, "skip", "price_gate",
+                           price, {"last": gate_last, "cand_n": gate_n})
+        store._auto_commit()
         return
     price = accepted
     store.state_mset_commit(coin_id, {
@@ -225,8 +231,6 @@ def tick_coin(store: Store, coin: dict, force_mode: str | None = None):
         sell_trail_pct=sell_trail_pct,
         sell_policy=sell_policy,
     )
-
-    ts = time.time()
 
     # --- Buy floor gate (#871) ---
     use_buy_floor  = _cfg_bool(cfg, "BUY_FLOOR", False)
@@ -510,8 +514,10 @@ def tick_coin(store: Store, coin: dict, force_mode: str | None = None):
     use_topup = _cfg_bool(cfg, "TOPUP_INSURANCE", False)
     topup_lot_usd = _cfg_float(cfg, "TOPUP_LOT_USD", 15.0)
     fresh_lots = [dict(r) for r in store.get_lots(coin_id)]
+    topup_fired = False
     if topup_buy_allowed(use_topup, topup_lot_usd, fresh_lots,
                          bought_this_tick, store.usdc_balance()):
+        topup_fired = True
         store.begin()
         try:
             if mode == "live":
@@ -542,6 +548,56 @@ def tick_coin(store: Store, coin: dict, force_mode: str | None = None):
                      coin_id, coin["slug"], topup_lot_usd, price)
             _alerts.alert_trade("buy", slug, tokens_approx, price,
                                 topup_lot_usd, None, mode, **_smtp())
+
+    # --- Decision ledger (#502): log what this tick decided ---
+    _log_tick_decision(store, coin_id, ts, price, decision, mode, cfg,
+                       cad_buy=cad_buy, prebuy_fired=prebuy_fired,
+                       in_floor_zone=in_floor_zone, topup_fired=topup_fired)
+
+
+def _log_tick_decision(store, coin_id: int, ts: float, price: float,
+                       decision: dict, mode: str, cfg: dict,
+                       cad_buy: bool = False, prebuy_fired: bool = False,
+                       in_floor_zone: bool = False, topup_fired: bool = False):
+    """Log the tick decision to the decisions table."""
+    sells = decision.get("sells", [])
+    buy_usd = decision.get("buy_usd", 0)
+
+    if sells and buy_usd > 0:
+        action = "buy+sell"
+    elif sells:
+        action = "sell"
+    elif buy_usd > 0:
+        action = "buy"
+    elif topup_fired:
+        action = "topup"
+    else:
+        action = "hold"
+
+    if buy_usd > 0:
+        if cad_buy:
+            reason = "floor_cadence"
+        elif prebuy_fired:
+            reason = "prebuy"
+        elif topup_fired:
+            reason = "topup"
+        else:
+            reason = "grid_step"
+    elif action == "hold":
+        reason = "no_signal"
+    else:
+        reason = "grid_step"
+
+    detail = {
+        "ref": decision.get("new_ref"),
+        "buy_usd": buy_usd,
+        "n_sells": len(sells),
+        "mode": mode,
+        "floor_zone": in_floor_zone,
+        "n_lots": len(decision.get("trail_updates", [])) + len(sells),
+    }
+    store.log_decision(coin_id, ts, action, reason, price, detail)
+    store._auto_commit()
 
 
 def main():
