@@ -69,6 +69,27 @@ signal.signal(signal.SIGTERM, _stop)
 signal.signal(signal.SIGINT, _stop)
 
 
+MONEY_CRITICAL_KEYS = ("MAX_CAPITAL_USD", "LOT_USD", "MAX_SLIPPAGE_BPS")
+
+
+def audit_live_config(cfg: dict, slug: str) -> list[str]:
+    """Validate that all money-critical keys are explicitly present for a live coin.
+    Returns a list of missing/invalid keys (empty = pass)."""
+    missing = []
+    for key in MONEY_CRITICAL_KEYS:
+        val = cfg.get(key)
+        if val is None or str(val).strip() == "":
+            missing.append(key)
+            continue
+        try:
+            f = float(val)
+            if f <= 0:
+                missing.append(key)
+        except (TypeError, ValueError):
+            missing.append(key)
+    return missing
+
+
 def _cfg_float(cfg: dict, key: str, default: float) -> float:
     try:
         return float(cfg.get(key, default))
@@ -93,10 +114,21 @@ def tick_coin(store: Store, coin: dict, force_mode: str | None = None):
 
     cfg = store.get_config(coin_id)
 
+    if mode == "live":
+        bad_keys = audit_live_config(cfg, coin["slug"])
+        if bad_keys:
+            log.error("coin=%d slug=%s: LIVE tick refused, missing/invalid money-critical config: %s",
+                      coin_id, coin["slug"], ", ".join(bad_keys))
+            _alerts.alert_error(coin["slug"],
+                                f"LIVE tick refused: missing config keys: {', '.join(bad_keys)}",
+                                **_smtp())
+            return
+
     buy_step      = _cfg_float(cfg, "BUY_STEP_PCT",    4.0)
     sell_step     = _cfg_float(cfg, "SELL_STEP_PCT",   buy_step)
     lot_usd       = _cfg_float(cfg, "LOT_USD",         25.0)
     max_cap_usd   = _cfg_float(cfg, "MAX_CAPITAL_USD", 200.0)
+    slippage_bps  = int(_cfg_float(cfg, "MAX_SLIPPAGE_BPS", 150))
     sell_trail    = _cfg_bool(cfg,  "SELL_TRAIL",      False)
     sell_trail_pct= _cfg_float(cfg, "SELL_TRAIL_PCT",  2.0)
     ceil_pct      = _cfg_float(cfg, "CEILING_PERCENTILE", 98.0)
@@ -373,6 +405,7 @@ def tick_coin(store: Store, coin: dict, force_mode: str | None = None):
                     token_mint=mint,
                     gas_reserve_lamports=config.GAS_RESERVE_LAMPORTS,
                     token_decimals=coin.get("decimals", 6),
+                    slippage_bps=slippage_bps,
                 )
             else:
                 txsig = paper_sell(store, coin_id, lot, price, mode="paper")
@@ -402,7 +435,8 @@ def tick_coin(store: Store, coin: dict, force_mode: str | None = None):
                                       low_sol, config.GAS_RESERVE_LAMPORTS)
         if gas_dec == "refill":
             txsig_gas = gas_refill(store, refill_usdc, config.RPC_URL,
-                                   config.KEYPAIR_PATH, config.QUOTE_MINT)
+                                   config.KEYPAIR_PATH, config.QUOTE_MINT,
+                                   slippage_bps=slippage_bps * 2)
             if txsig_gas:
                 log.info("coin=%d slug=%s: gas refill %.2f USDC -> SOL tx=%s",
                          coin_id, coin["slug"], refill_usdc, txsig_gas)
@@ -435,6 +469,7 @@ def tick_coin(store: Store, coin: dict, force_mode: str | None = None):
                     gas_reserve_lamports=config.GAS_RESERVE_LAMPORTS,
                     token_decimals=coin.get("decimals", 6),
                     origin=buy_origin,
+                    slippage_bps=slippage_bps,
                 )
             else:
                 txsig = paper_buy(store, coin_id, decision["buy_usd"], price, ts,
@@ -478,6 +513,7 @@ def tick_coin(store: Store, coin: dict, force_mode: str | None = None):
                     gas_reserve_lamports=config.GAS_RESERVE_LAMPORTS,
                     token_decimals=coin.get("decimals", 6),
                     origin="topup",
+                    slippage_bps=slippage_bps,
                 )
             else:
                 txsig = paper_buy(store, coin_id, topup_lot_usd, price, ts,
@@ -515,6 +551,19 @@ def main():
     released = store.reconcile_reserves()
     if released:
         log.warning("Startup reconciliation: released %d orphaned reserve(s)", released)
+
+    if args.live or force_mode is None:
+        live_coins = store.list_coins("live")
+        for lc in live_coins:
+            lcfg = store.get_config(lc["id"])
+            bad = audit_live_config(lcfg, lc["slug"])
+            if bad:
+                log.error("Boot audit FAILED for live coin '%s': missing %s",
+                          lc["slug"], ", ".join(bad))
+                sys.exit(1)
+        if live_coins:
+            log.info("Boot audit: %d live coin(s) passed config validation", len(live_coins))
+
     log.info("Scheduler started. DB=%s tick=%ds mode=%s",
              config.DB_PATH, TICK_INTERVAL, force_mode or "per-coin")
 

@@ -471,6 +471,17 @@ CATALOG = [
         "Keep it smaller than LOT_USD (e.g. $15 vs $25 lot) so it is a safety net, not the primary strategy.",
     ),
 
+    # ── Slippage ──────────────────────────────────────────────────────────────
+    (
+        "MAX_SLIPPAGE_BPS", "editable", "coin-allowed", "float", "10", "1000", "150", "150",
+        "Max slippage (basis points)",
+        "Maximum slippage tolerance for Jupiter swaps, in basis points (100 bps = 1%). "
+        "150 bps = 1.5% is the default for regular buys/sells. "
+        "Gas refills use 2× this value because SOL/USDC is more liquid but the swap is smaller. "
+        "MONEY-CRITICAL: must be explicitly set for any live coin (fail-closed). "
+        "Too tight and swaps fail on volatile tokens; too loose and you lose to MEV.",
+    ),
+
     # ── Fleet-level / system ───────────────────────────────────────────────────
     (
         "QUOTE_MINT", "locked-visible", "fleet-only", "text", None, None,

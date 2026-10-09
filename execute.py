@@ -185,7 +185,8 @@ def paper_sell(store, coin_id: int, lot: dict, price: float, mode: str = "paper"
 def live_buy(store, coin_id: int, usd: float, price: float, ts: float,
              rpc_url: str, keypair_path: str, quote_mint: str,
              token_mint: str, gas_reserve_lamports: int,
-             token_decimals: int = 6, origin: str = "grid") -> str:
+             token_decimals: int = 6, origin: str = "grid",
+             slippage_bps: int = 150) -> str:
     """Execute a real buy swap via Jupiter. Returns txsig or '' on failure."""
     kp = load_keypair(keypair_path)
     wallet = str(kp.pubkey())
@@ -206,7 +207,7 @@ def live_buy(store, coin_id: int, usd: float, price: float, ts: float,
     # Quote
     quote_url = (
         f"{JUPITER_QUOTE_URL}?inputMint={quote_mint}&outputMint={token_mint}"
-        f"&amount={in_amount}&slippageBps=150"
+        f"&amount={in_amount}&slippageBps={slippage_bps}"
     )
     quote = _get_json(quote_url)
     if not quote:
@@ -262,7 +263,8 @@ def live_buy(store, coin_id: int, usd: float, price: float, ts: float,
 def live_sell(store, coin_id: int, lot: dict, price: float,
               rpc_url: str, keypair_path: str, quote_mint: str,
               token_mint: str, gas_reserve_lamports: int,
-              token_decimals: int = 6) -> str:
+              token_decimals: int = 6,
+              slippage_bps: int = 150) -> str:
     """Execute a real sell swap via Jupiter. Returns txsig or '' on failure."""
     if not revalidate_effective_sale(lot, price):
         log.warning("live_sell: hard rule blocks lot=%d at price=%.6f", lot["id"], price)
@@ -281,7 +283,7 @@ def live_sell(store, coin_id: int, lot: dict, price: float,
 
     quote_url = (
         f"{JUPITER_QUOTE_URL}?inputMint={token_mint}&outputMint={quote_mint}"
-        f"&amount={in_amount}&slippageBps=150"
+        f"&amount={in_amount}&slippageBps={slippage_bps}"
     )
     quote = _get_json(quote_url)
     if not quote:
@@ -338,7 +340,7 @@ SOL_MINT = "So11111111111111111111111111111111111111112"
 
 
 def gas_refill(store, refill_usdc: float, rpc_url: str, keypair_path: str,
-               quote_mint: str) -> str:
+               quote_mint: str, slippage_bps: int = 300) -> str:
     """Swap USDC -> SOL to refill gas. LIVE only. Returns txsig or ''."""
     kp = load_keypair(keypair_path)
     wallet = str(kp.pubkey())
@@ -347,7 +349,7 @@ def gas_refill(store, refill_usdc: float, rpc_url: str, keypair_path: str,
 
     quote_url = (
         f"{JUPITER_QUOTE_URL}?inputMint={quote_mint}&outputMint={SOL_MINT}"
-        f"&amount={in_amount}&slippageBps=300"
+        f"&amount={in_amount}&slippageBps={slippage_bps}"
     )
     quote = _get_json(quote_url)
     if not quote:
