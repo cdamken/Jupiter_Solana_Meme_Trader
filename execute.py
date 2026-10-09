@@ -236,6 +236,76 @@ def paper_sell(store, coin_id: int, lot: dict, price: float,
     return txsig
 
 
+# ---- Batch sell (paper) ----
+
+def paper_batch_sell(store, coin_id: int, lots: list[dict], price: float,
+                     mode: str = "paper", fee: float = 0.015) -> str:
+    """Sell multiple lots as one batch in paper mode. Applies fee.
+
+    Validates each lot individually (no-loss rule). If any lot fails,
+    drops that lot and continues with the rest (degrades to fewer lots).
+    Returns a compound txsig or '' if nothing sold.
+    """
+    if not lots:
+        return ""
+    sold_ids = []
+    total_proceeds = 0.0
+    total_tokens = 0.0
+    for lot in lots:
+        if not revalidate_effective_sale(lot, price, fee):
+            log.warning("[paper-batch] lot=%d blocked by no-loss rule at price=%.6f",
+                        lot["id"], price)
+            continue
+        tokens = lot["tokens"]
+        proceeds = tokens * price * (1 - fee)
+        pnl_pct = (proceeds - lot["cost"]) / lot["cost"] * 100.0
+        store.remove_lot(lot["id"])
+        total_proceeds += proceeds
+        total_tokens += tokens
+        sold_ids.append(lot["id"])
+
+    if not sold_ids:
+        return ""
+
+    txsig = f"paper-batch-{'-'.join(str(i) for i in sold_ids)}"
+    total_cost = sum(l["cost"] for l in lots if l["id"] in sold_ids)
+    pnl_pct = (total_proceeds - total_cost) / total_cost * 100.0 if total_cost > 0 else 0.0
+    store.usdc_commit_sell(total_proceeds, coin_id, txsig, price, total_tokens, pnl_pct, mode)
+    log.info("[paper-batch] SELL coin=%d lots=%d tokens=%.4f price=%.6f proceeds=%.2f pnl=%.1f%%",
+             coin_id, len(sold_ids), total_tokens, price, total_proceeds, pnl_pct)
+    return txsig
+
+
+# ---- Batch sell preflight (pure) ----
+
+def preflight_batch_shrink(lots: list[dict], price: float,
+                           fee: float = 0.015) -> list[dict]:
+    """Preflight check: drop lots that fail no-loss at the given price.
+
+    Returns the surviving lots. If a lot is a dust RIDER (origin contains
+    'rider'), drop it before a real lot. Degrades gracefully to 1 lot or empty.
+    """
+    from engine import drop_least_gain_lot
+
+    passing = [l for l in lots if revalidate_effective_sale(l, price, fee)]
+
+    if len(passing) == len(lots):
+        return passing
+
+    riders = [l for l in lots if "rider" in l.get("origin", "")]
+    non_riders = [l for l in lots if "rider" not in l.get("origin", "")]
+
+    result = []
+    for l in riders:
+        if revalidate_effective_sale(l, price, fee):
+            result.append(l)
+    for l in non_riders:
+        if revalidate_effective_sale(l, price, fee):
+            result.append(l)
+
+    return result
+
+
 # ---- Live mode ----
 
 def _jupiter_quote(input_mint: str, output_mint: str,
