@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.env
+store/jupiter.db
+store/*.db-wal
+store/*.db-shm
+.claude/
+panel.log

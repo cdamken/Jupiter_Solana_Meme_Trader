@@ -81,8 +81,8 @@ print()
 if FAILURES:
     for f in FAILURES:
         print(f)
-    print(f"\nHAY FALLAS: {len(FAILURES)} failures")
+    print(f"\nFAILURES: {len(FAILURES)}")
     sys.exit(1)
 else:
-    print("TODOS OK")
+    print("ALL OK")
     sys.exit(0)

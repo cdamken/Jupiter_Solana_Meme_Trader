@@ -178,3 +178,15 @@ CREATE TABLE IF NOT EXISTS trades (
     txsig             TEXT                      -- 'tx'
 );
 CREATE INDEX IF NOT EXISTS ix_trades_coin_ts ON trades(coin_id, ts);
+
+-- Per-coin runtime state (KV). Replaces SIMD's flat JSON state dict. Every key
+-- that the scheduler/engine needs between ticks lives here: ref price, price-gate
+-- candidates, floor episode, last_sell_ts, etc. Mutated in the SAME transaction
+-- as lot/ledger changes so the state is always consistent with the book.
+-- value is always TEXT; the caller casts (engine.py is pure, scheduler reads/writes).
+CREATE TABLE IF NOT EXISTS coin_state (
+    coin_id      INTEGER NOT NULL REFERENCES coins(id) ON DELETE CASCADE,
+    key          TEXT NOT NULL,
+    value        TEXT NOT NULL,
+    PRIMARY KEY (coin_id, key)
+);

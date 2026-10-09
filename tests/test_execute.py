@@ -113,6 +113,18 @@ with tempfile.TemporaryDirectory() as d:
     check("paper_sell at loss blocked", txsig4, "")
     check("lot still present after blocked sell", len(s.get_lots(coin_id)), 1)
 
+    # origin param: floor-zone buy creates reserve lot
+    txsig_r = paper_buy(s, coin_id, 25.0, 0.5, time.time(), origin="reserve")
+    lots_r = s.get_lots(coin_id)
+    reserve_lot = [l for l in lots_r if dict(l)["origin"] == "reserve"]
+    check("reserve origin: lot created", len(reserve_lot), 1)
+
+    # default origin is grid
+    txsig_g = paper_buy(s, coin_id, 25.0, 0.5, time.time())
+    lots_all = s.get_lots(coin_id)
+    grid_lots = [l for l in lots_all if dict(l)["origin"] == "grid"]
+    check_true("default origin: grid lot exists", len(grid_lots) >= 1)
+
     # paper_buy with insufficient funds
     s2 = Store(os.path.join(d, "test2.db"))
     coin_id2 = s2.add_coin("c2", "C2", "C2Mint" + "1" * 35)
@@ -124,8 +136,8 @@ print()
 if FAILURES:
     for f in FAILURES:
         print(f)
-    print(f"\nHAY FALLAS: {len(FAILURES)} failures")
+    print(f"\nFAILURES: {len(FAILURES)}")
     sys.exit(1)
 else:
-    print("TODOS OK")
+    print("ALL OK")
     sys.exit(0)
