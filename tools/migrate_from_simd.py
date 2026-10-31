@@ -1,27 +1,40 @@
 #!/usr/bin/env python3
-"""tools/migrate_from_simd.py -- Import a SIMD bot's live lot-book into Jupiter.
+"""tools/migrate_from_simd.py -- Migrate lots between SIMD and Jupiter.
 
-Reads trader_state.json (or trader_estado.json) from a SIMD bot directory,
-creates the coin in Jupiter's DB (if it doesn't already exist), and inserts
-every open lot. Idempotent per coin: if the coin already has lots in Jupiter
-the script aborts for that slug rather than double-inserting.
+Supports two directions:
 
-Usage:
+  SIMD -> Jupiter (default):
+    Reads trader_state.json from a SIMD bot directory, creates the coin in
+    Jupiter's DB, and inserts every open lot.
+
+  Jupiter -> SIMD (--to-simd):
+    Reads a coin's lots from Jupiter's DB and writes a trader_state.json in
+    SIMD format. READ-ONLY against Jupiter's DB.
+
+Usage (SIMD -> Jupiter):
     python3 tools/migrate_from_simd.py \\
-        --simd-dir  /home/carlos/simd          \\  # or a local clone/copy
+        --simd-dir  /home/carlos/simd          \\
         --slug      simd                        \\
         --label     SIMD                        \\
         --mint      SiMDt...                    \\
         --decimals  6                           \\
-        [--status   paper]                      \\  # default: paper (safe)
+        [--status   paper]                      \\
         [--db       store/jupiter.db]
+
+Usage (Jupiter -> SIMD):
+    python3 tools/migrate_from_simd.py --to-simd \\
+        --slug      simd                        \\
+        --output-dir /home/carlos/simd          \\
+        [--db       store/jupiter.db]           \\
+        [--force]
 
 Safety gates:
   - Default status is 'paper'; pass --status live only when you are sure.
-  - Coins already present with open lots are never overwritten.
+  - Coins already present with open lots are never overwritten (SIMD -> Jupiter).
   - Lots with tok <= 0 or cost <= 0 are skipped with a warning.
-  - The script is READ-ONLY against the SIMD directory.
-  - No real swaps; only DB writes.
+  - The script is READ-ONLY against the source (SIMD dir or Jupiter DB).
+  - --to-simd will NOT overwrite an existing trader_state.json unless --force.
+  - No real swaps; only DB reads / file writes.
 """
 import argparse
 import json
@@ -228,52 +241,151 @@ def migrate(simd_dir: str, slug: str, label: str, mint: str,
 
 
 # --------------------------------------------------------------------------- #
+# Reverse migration: Jupiter -> SIMD                                           #
+# --------------------------------------------------------------------------- #
+
+# Inverse of _LOT_KEY_RENAMES (Jupiter key -> SIMD key).
+_JUPITER_TO_SIMD_KEY = {v: k for k, v in _LOT_KEY_RENAMES.items() if k != v}
+# Value renames reversed (Jupiter value -> SIMD value).
+_JUPITER_TO_SIMD_VALUES = {
+    field: {v: k for k, v in mapping.items()}
+    for field, mapping in _LOT_VALUE_RENAMES.items()
+}
+
+
+def export_to_simd(slug: str, output_dir: str, db_path: str,
+                   force: bool = False) -> str:
+    """Export a coin's lots from Jupiter DB to a SIMD-format trader_state.json.
+
+    Returns the path to the written file.
+    READ-ONLY against the Jupiter DB -- no modifications.
+    """
+    out_path = os.path.join(output_dir, "trader_state.json")
+
+    # Safety: refuse to overwrite unless --force.
+    if os.path.exists(out_path) and not force:
+        raise FileExistsError(
+            f"{out_path} already exists. Pass --force to overwrite."
+        )
+
+    store = Store(db_path)
+
+    coin = store.get_coin(slug)
+    if not coin:
+        raise ValueError(f"Coin '{slug}' not found in Jupiter DB at {db_path}")
+
+    coin_id = coin["id"]
+    lots = store.get_lots(coin_id)
+    print(f"[export] coin '{slug}' (id={coin_id}): {len(lots)} lot(s) in Jupiter")
+
+    simd_lots = []
+    for lot in lots:
+        simd_lot = {
+            "tok":            lot["tokens"],
+            "usd":            lot["cost"],
+            "precio_compra":  lot["buy_price"],
+            "ts":             lot["ts"],
+        }
+
+        # Map origin back to SIMD naming.
+        origin = lot["origin"]
+        simd_origin = _JUPITER_TO_SIMD_VALUES.get("origin", {}).get(origin, origin)
+        simd_lot["origen"] = simd_origin
+
+        simd_lots.append(simd_lot)
+
+    state = {"lotes": simd_lots}
+
+    os.makedirs(output_dir, exist_ok=True)
+    with open(out_path, "w") as f:
+        json.dump(state, f, indent=2)
+
+    print(f"[export] wrote {len(simd_lots)} lot(s) to {out_path}")
+    return out_path
+
+
+# --------------------------------------------------------------------------- #
 # CLI                                                                          #
 # --------------------------------------------------------------------------- #
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--simd-dir",  required=True,
-                    help="Path to the SIMD bot directory containing trader_state.json")
+    # Direction flag.
+    ap.add_argument("--to-simd",   action="store_true",
+                    help="Reverse migration: export from Jupiter DB to SIMD JSON")
+
+    # Common.
     ap.add_argument("--slug",      required=True,
                     help="Coin slug in Jupiter (e.g. 'simd')")
+    ap.add_argument("--db",        default=None,
+                    help="Jupiter DB path (default: JUPITER_DB env or store/jupiter.db)")
+
+    # SIMD -> Jupiter only.
+    ap.add_argument("--simd-dir",  default=None,
+                    help="Path to the SIMD bot directory containing trader_state.json")
     ap.add_argument("--label",     default="",
                     help="Display label (defaults to slug.upper())")
-    ap.add_argument("--mint",      required=True,
+    ap.add_argument("--mint",      default=None,
                     help="Token mint address")
     ap.add_argument("--decimals",  type=int, default=6,
                     help="Token decimals (6 = pump.fun, 9 = SOL/native SPL)")
     ap.add_argument("--status",    default="paper",
                     choices=("paper", "live", "paused"),
                     help="Initial coin status in Jupiter (default: paper)")
-    ap.add_argument("--db",        default=None,
-                    help="Jupiter DB path (default: JUPITER_DB env or store/jupiter.db)")
+
+    # Jupiter -> SIMD only.
+    ap.add_argument("--output-dir", default=None,
+                    help="Directory to write trader_state.json into (--to-simd)")
+    ap.add_argument("--force",     action="store_true",
+                    help="Overwrite existing trader_state.json (--to-simd)")
+
     args = ap.parse_args()
-
     db_path = args.db or _DB_DEFAULT
-    label   = args.label or args.slug.upper()
 
-    print(f"[config] db={db_path}  simd-dir={args.simd_dir}")
-
-    if args.status == "live":
-        confirm = input(
-            f"WARNING: status=live will start real trading for '{args.slug}'. "
-            "Type the slug to confirm: "
-        ).strip()
-        if confirm != args.slug:
-            print("[abort] slug did not match. No changes made.")
+    if args.to_simd:
+        # --- reverse migration ---
+        output_dir = args.output_dir
+        if not output_dir:
+            print("[error] --output-dir is required when using --to-simd")
+            sys.exit(1)
+        print(f"[config] db={db_path}  output-dir={output_dir}")
+        export_to_simd(
+            slug=args.slug,
+            output_dir=output_dir,
+            db_path=db_path,
+            force=args.force,
+        )
+    else:
+        # --- forward migration (SIMD -> Jupiter) ---
+        if not args.simd_dir:
+            print("[error] --simd-dir is required for SIMD -> Jupiter migration")
+            sys.exit(1)
+        if not args.mint:
+            print("[error] --mint is required for SIMD -> Jupiter migration")
             sys.exit(1)
 
-    migrate(
-        simd_dir=args.simd_dir,
-        slug=args.slug,
-        label=label,
-        mint=args.mint,
-        decimals=args.decimals,
-        status=args.status,
-        db_path=db_path,
-    )
+        label = args.label or args.slug.upper()
+        print(f"[config] db={db_path}  simd-dir={args.simd_dir}")
+
+        if args.status == "live":
+            confirm = input(
+                f"WARNING: status=live will start real trading for '{args.slug}'. "
+                "Type the slug to confirm: "
+            ).strip()
+            if confirm != args.slug:
+                print("[abort] slug did not match. No changes made.")
+                sys.exit(1)
+
+        migrate(
+            simd_dir=args.simd_dir,
+            slug=args.slug,
+            label=label,
+            mint=args.mint,
+            decimals=args.decimals,
+            status=args.status,
+            db_path=db_path,
+        )
 
 
 if __name__ == "__main__":
