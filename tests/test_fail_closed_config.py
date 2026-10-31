@@ -8,7 +8,7 @@ os.environ.setdefault("QUOTE_MINT", "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from scheduler import audit_live_config, MONEY_CRITICAL_KEYS
+from tick import audit_live_config, MONEY_CRITICAL_KEYS
 
 
 class TestAuditLiveConfig(unittest.TestCase):
