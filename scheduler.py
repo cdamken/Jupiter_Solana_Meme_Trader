@@ -115,6 +115,7 @@ def tick_coin(store: Store, coin: dict, force_mode: str | None = None):
         return
 
     cfg = store.get_config(coin_id)
+    ts = time.time()
 
     if mode == "live":
         bad_keys = audit_live_config(cfg, coin["slug"])
