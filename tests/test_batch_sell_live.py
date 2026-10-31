@@ -156,11 +156,11 @@ with tempfile.TemporaryDirectory() as d:
 
 # ---- scheduler wiring: batch path exists ----
 print("\n[scheduler_wiring]")
-sched_src = open(os.path.join(os.path.dirname(os.path.dirname(__file__)), "scheduler.py")).read()
-check_true("imports_batch_sell", "paper_batch_sell" in sched_src)
-check_true("imports_preflight", "preflight_batch_shrink" in sched_src)
-check_true("batch_path_branch", "use_batch and len(sell_lots) > 1" in sched_src)
-check_true("serial_fallback", "Serial single-lot sells" in sched_src)
+tick_src = open(os.path.join(os.path.dirname(os.path.dirname(__file__)), "tick.py")).read()
+check_true("imports_batch_sell", "paper_batch_sell" in tick_src)
+check_true("imports_preflight", "preflight_batch_shrink" in tick_src)
+check_true("batch_path_branch", "use_batch and len(sell_lots) > 1" in tick_src)
+check_true("serial_fallback", "Serial single-lot sells" in tick_src or "_serial_sells" in tick_src)
 
 
 print()
