@@ -533,6 +533,13 @@ CATALOG = [
         "SIMD measured median slippage ~0% and worst 0.52% on $40 clips — 150 bps (1.5%) "
         "gives comfortable headroom for meme tokens. Increase for low-liquidity pairs.",
     ),
+    (
+        "COIN_TICK_TIMEOUT_S", "editable", "fleet-only", "int", "10", "120", "30", "30",
+        "Per-coin tick timeout (seconds)",
+        "Maximum time a single coin's tick may take before being skipped. "
+        "Prevents a hung RPC or DexScreener call from stalling the entire fleet. "
+        "The coin is retried next tick. Visible in logs and panel as status 'late'.",
+    ),
 ]
 
 FLEET_DEFAULTS = {row[0]: row[6] for row in CATALOG}
