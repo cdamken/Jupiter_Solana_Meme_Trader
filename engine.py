@@ -689,6 +689,30 @@ def price_gate(price: float, last: float, max_step_pct: float,
 
 # ---- Concentration cap (#1021) ----
 
+def caps_for(n_active: int, k_normal: float = 1.5, k_band: float = 2.0,
+             floor_pct: float = 10.0, ceil_normal: float = 60.0,
+             ceil_band: float = 80.0) -> tuple[float, float]:
+    """Concentration caps that scale with coin count (#34).
+
+    Returns (normal_cap_pct, band_cap_pct) where each is
+    k * fair_share clamped to [floor_pct, ceil].
+
+    fair_share = 100 / n_active.
+
+    Guards:
+      N <= 0  -> (ceil_normal, ceil_band)  -- no coins = no restriction.
+      N = 1   -> k * 100% clamped to ceil  -- single-coin fleet.
+
+    At N=5 with defaults: (30.0, 40.0) -- reproduces SIMD's classic 30/40.
+    """
+    if n_active <= 0:
+        return (ceil_normal, ceil_band)
+    fair = 100.0 / n_active
+    normal = max(floor_pct, min(k_normal * fair, ceil_normal))
+    band   = max(floor_pct, min(k_band   * fair, ceil_band))
+    return (normal, band)
+
+
 def apply_capital_pct_cap(cap_usd, fleet_total, pct):
     """Tighten a per-coin USD cap to a share of the fleet total. pct<=0 = OFF.
     The concentration ceiling = pct% of fleet_total; returns min(cap_usd, ceiling).

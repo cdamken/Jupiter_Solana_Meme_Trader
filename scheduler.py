@@ -28,7 +28,7 @@ from engine import (
     revalidate_combined_sale, gas_refill_decision,
     topup_buy_allowed,
     cap_batch_plan, drop_least_gain_lot,
-    apply_capital_pct_cap,
+    apply_capital_pct_cap, caps_for,
 )
 from vol_engine import realized_vol, vol_steps
 from execute import (
@@ -133,6 +133,11 @@ def tick_coin(store: Store, coin: dict, force_mode: str | None = None):
     max_cap_usd   = _cfg_float(cfg, "MAX_CAPITAL_USD", 200.0)
     slippage_bps  = int(_cfg_float(cfg, "MAX_SLIPPAGE_BPS", 150))
     capital_pct   = _cfg_float(cfg, "MAX_CAPITAL_PCT", 0.0)
+    auto_cap      = _cfg_bool(cfg, "AUTO_CAP_SCALE", False)
+    if auto_cap:
+        n_active = len([c for c in store.list_coins()
+                        if c["status"] in ("paper", "live")])
+        capital_pct, _ = caps_for(n_active)
     if capital_pct > 0:
         fleet_total = store.fleet_deployed_usd() + store.usdc_balance()
         max_cap_usd = apply_capital_pct_cap(max_cap_usd, fleet_total, capital_pct)

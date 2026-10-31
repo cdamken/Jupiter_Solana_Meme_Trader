@@ -62,6 +62,15 @@ CATALOG = [
         "Set to 30 per SIMD's fleet-wide calibration (CHILLGUY incident 09.10.2026).",
     ),
     (
+        "AUTO_CAP_SCALE", "editable", "fleet-only", "bool", None, None, "0", "0",
+        "Auto-scaling concentration cap",
+        "0 = off. Use the static MAX_CAPITAL_PCT value. "
+        "1 = compute the concentration cap dynamically from the number of active coins via caps_for(). "
+        "The formula: cap = clamp(1.5 × (100/N), 10%, 60%) where N = active coin count. "
+        "At N=5 this reproduces SIMD's 30% cap; at N=10 it tightens to 15%; at N=2 it is 60%. "
+        "Overrides MAX_CAPITAL_PCT when enabled; MAX_CAPITAL_USD still applies as a hard floor.",
+    ),
+    (
         "SELL_TRAIL", "editable", "coin-allowed", "bool", None, None, "0", "0",
         "Trailing sell",
         "0 = fixed exit: each lot sells the instant it crosses its +SELL_STEP_PCT target. "
