@@ -19,7 +19,7 @@ os.environ.setdefault("QUOTE_MINT",    "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyT
 
 import config  # noqa -- env vars must be set before import
 from store.store import Store
-import scheduler
+import tick as scheduler
 
 FAILURES = []
 

@@ -179,9 +179,9 @@ check_true("live_sell_has_slippage", "slippage_bps" in sig_ls.parameters)
 
 # ---- scheduler passes slippage_bps ----
 print("\n[scheduler_slippage]")
-sched_src = open(os.path.join(os.path.dirname(os.path.dirname(__file__)), "scheduler.py")).read()
-check_true("scheduler_passes_slippage", "slippage_bps=slippage_bps" in sched_src)
-slippage_count = sched_src.count("slippage_bps=slippage_bps")
+tick_src = open(os.path.join(os.path.dirname(os.path.dirname(__file__)), "tick.py")).read()
+check_true("scheduler_passes_slippage", "slippage_bps=slippage_bps" in tick_src)
+slippage_count = tick_src.count("slippage_bps=slippage_bps")
 check("scheduler_all_live_calls", slippage_count, 4)
 
 

@@ -26,11 +26,11 @@ def chk(name, cond):
 
 # Read the scheduler source to verify the guard exists
 import inspect
-import scheduler
+import tick
 
-source = inspect.getsource(scheduler.tick_coin)
+source = inspect.getsource(tick.phase_pairing)
 
-chk("pairing live guard: mode == 'live' check exists in tick_coin",
+chk("pairing live guard: mode == 'live' check exists in phase_pairing",
     'mode == "live"' in source and "PAIRING_GRID blocked" in source)
 
 chk("pairing paper path uses mode='paper' not variable mode",
